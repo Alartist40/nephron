@@ -1,0 +1,15 @@
+[package]
+name = "nephron-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+eframe.workspace = true
+nephron-bridge = { path = "../nephron-bridge" }
+nephron-cad = { path = "../nephron-cad" }
+nephron-pets = { path = "../nephron-pets" }
+nephron-swarm = { path = "../nephron-swarm" }
+nephron-voice = { path = "../nephron-voice" }
+tokio.workspace = true

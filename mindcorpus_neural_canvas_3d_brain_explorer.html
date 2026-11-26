@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MINDCORPUS — Collective Neural Architecture</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Three.js (r128) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        obsidian: '#030407',
+                        neural: {
+                            cyan: '#38bdf8',
+                            indigo: '#818cf8',
+                            violet: '#c084fc',
+                            amber: '#fbbf24'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Minimalist OS canvas aesthetics */
+        html, body {
+            background-color: #030407;
+            color: #f8fafc;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        #neural-canvas-container {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 0;
+            cursor: grab;
+        }
+
+        #neural-canvas-container:active {
+            cursor: grabbing;
+        }
+
+        .glass-dock {
+            background: rgba(12, 16, 28, 0.68);
+            backdrop-filter: blur(22px);
+            -webkit-backdrop-filter: blur(22px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        .glass-popover {
+            background: rgba(10, 14, 24, 0.78);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.85);
+        }
+
+        /* Subtle vignette to frame the 3D glitter brain */
+        .radial-vignette {
+            background: radial-gradient(circle at 50% 50%, transparent 45%, rgba(3, 4, 7, 0.75) 100%);
+            pointer-events: none;
+        }
+
+        /* OS Dock Icon Hover Magnification & Tooltip */
+        .dock-item {
+            transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.2s ease, border-color 0.2s ease;
+        }
+        .dock-item:hover {
+            transform: translateY(-6px) scale(1.1);
+        }
+        .dock-item:active {
+            transform: translateY(-2px) scale(0.96);
+        }
+
+        .dock-tooltip {
+            opacity: 0;
+            transform: translate(-50%, 6px);
+            transition: opacity 0.18s ease, transform 0.18s ease;
+            pointer-events: none;
+        }
+        .dock-item:hover .dock-tooltip {
+            opacity: 1;
+            transform: translate(-50%, 0);
+        }
+
+        /* Range input styling for tool popovers */
+        input[type="range"] {
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.12);
+            height: 4px;
+            border-radius: 999px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #38bdf8;
+            cursor: pointer;
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.85);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Fullscreen 3D WebGL Brain Canvas -->
+    <div id="neural-canvas-container"></div>
+    <div class="fixed inset-0 radial-vignette z-[1]"></div>
+
+    <!-- Floating Tool Popover Window (Opens above OS Dock when a tool is clicked) -->
+    <div id="dock-popover" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 w-72 max-w-[calc(100vw-2rem)] glass-popover rounded-2xl p-4 transition-all duration-200 opacity-0 pointer-events-none translate-y-3">
+        <!-- Viewpoints Tool Content -->
+        <div id="panel-viewpoints" class="tool-panel hidden">
+            <div class="text-[11px] font-mono uppercase tracking-wider text-slate-400 mb-3">Camera Viewpoints</div>
+            <div class="grid grid-cols-2 gap-2">
+                <button data-preset="frontal" class="preset-btn py-2 px-3 rounded-xl text-xs font-mono bg-white/5 hover:bg-sky-500/20 hover:text-sky-300 border border-white/10 text-slate-200 transition-all">Frontal</button>
+                <button data-preset="sagittal" class="preset-btn py-2 px-3 rounded-xl text-xs font-mono bg-white/5 hover:bg-sky-500/20 hover:text-sky-300 border border-white/10 text-slate-200 transition-all">Lateral</button>
+                <button data-preset="dorsal" class="preset-btn py-2 px-3 rounded-xl text-xs font-mono bg-white/5 hover:bg-sky-500/20 hover:text-sky-300 border border-white/10 text-slate-200 transition-all">Dorsal</button>
+                <button data-preset="reset" class="preset-btn py-2 px-3 rounded-xl text-xs font-mono bg-white/5 hover:bg-sky-500/20 hover:text-sky-300 border border-white/10 text-slate-200 transition-all">Reset</button>
+            </div>
+        </div>
+
+        <!-- Neural Tuning Tool Content -->
+        <div id="panel-tuning" class="tool-panel hidden space-y-3.5">
+            <div>
+                <div class="flex justify-between text-[11px] font-mono mb-1.5">
+                    <span class="text-slate-400">Pulse Velocity</span>
+                    <span id="val-pulse-speed" class="text-sky-300">1.0x</span>
+                </div>
+                <input id="slider-pulse-speed" type="range" min="0.2" max="3.0" step="0.1" value="1.0" class="w-full">
+            </div>
+
+            <div>
+                <div class="flex justify-between text-[11px] font-mono mb-1.5">
+                    <span class="text-slate-400">Glitter Luminance</span>
+                    <span id="val-glitter" class="text-sky-300">1.0</span>
+                </div>
+                <input id="slider-glitter" type="range" min="0.3" max="2.2" step="0.1" value="1.0" class="w-full">
+            </div>
+
+            <div>
+                <div class="flex justify-between text-[11px] font-mono mb-1.5">
+                    <span class="text-slate-400">Synapse Density</span>
+                    <span id="val-density" class="text-sky-300">100%</span>
+                </div>
+                <input id="slider-density" type="range" min="0.2" max="1.0" step="0.05" value="1.0" class="w-full">
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom OS-Style Application Dock -->
+    <nav aria-label="Neural OS Dock" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 glass-dock rounded-2xl px-3 py-2 flex items-center gap-2 sm:gap-2.5">
+        
+        <!-- Tool 1: Auto-Orbit Toggle -->
+        <button id="dock-auto-rotate" class="dock-item relative w-11 h-11 rounded-xl bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-sky-300">
+            <span class="dock-tooltip absolute -top-9 left-1/2 px-2.5 py-1 rounded-lg glass-popover text-[10px] font-mono text-white whitespace-nowrap">Auto-Spin: ON</span>
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span id="dot-auto-rotate" class="absolute -bottom-1 w-1 h-1 rounded-full bg-sky-400"></span>
+        </button>
+
+        <!-- Tool 2: Anatomical Viewpoints -->
+        <button id="dock-viewpoints" data-panel="panel-viewpoints" class="dock-item dock-popover-trigger relative w-11 h-11 rounded-xl bg-white/[0.04] hover:bg-white/10 border border-white/10 flex items-center justify-center text-slate-200">
+            <span class="dock-tooltip absolute -top-9 left-1/2 px-2.5 py-1 rounded-lg glass-popover text-[10px] font-mono text-white whitespace-nowrap">Camera Angles</span>
+            <svg class="w-5 h-5 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+            </svg>
+        </button>
+
+        <!-- Tool 3: Synaptic & Glitter Tuner -->
+        <button id="dock-tuning" data-panel="panel-tuning" class="dock-item dock-popover-trigger relative w-11 h-11 rounded-xl bg-white/[0.04] hover:bg-white/10 border border-white/10 flex items-center justify-center text-slate-200">
+            <span class="dock-tooltip absolute -top-9 left-1/2 px-2.5 py-1 rounded-lg glass-popover text-[10px] font-mono text-white whitespace-nowrap">Neural Parameters</span>
+            <svg class="w-5 h-5 text-sky-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+            </svg>
+        </button>
+
+        <!-- Tool 4: Fire Synaptic Cascade -->
+        <button id="trigger-burst-btn" class="dock-item relative w-11 h-11 rounded-xl bg-white/[0.04] hover:bg-white/10 border border-white/10 flex items-center justify-center text-amber-300">
+            <span class="dock-tooltip absolute -top-9 left-1/2 px-2.5 py-1 rounded-lg glass-popover text-[10px] font-mono text-white whitespace-nowrap">Fire Cascade</span>
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+        </button>
+
+        <!-- Tool 5: Cycle Spectrum Palette -->
+        <button id="cycle-palette-btn" class="dock-item relative w-11 h-11 rounded-xl bg-white/[0.04] hover:bg-white/10 border border-white/10 flex items-center justify-center text-purple-300">
+            <span class="dock-tooltip absolute -top-9 left-1/2 px-2.5 py-1 rounded-lg glass-popover text-[10px] font-mono text-white whitespace-nowrap">Spectrum Shift</span>
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+            </svg>
+        </button>
+
+        <!-- Subtle OS Dock Divider -->
+        <div class="w-[1px] h-7 bg-white/10 mx-0.5"></div>
+
+        <!-- Tool 6: PNG Snapshot -->
+        <button id="capture-png-btn" class="dock-item relative w-11 h-11 rounded-xl bg-white/[0.04] hover:bg-white/10 border border-white/10 flex items-center justify-center text-emerald-300">
+            <span class="dock-tooltip absolute -top-9 left-1/2 px-2.5 py-1 rounded-lg glass-popover text-[10px] font-mono text-white whitespace-nowrap">Capture PNG</span>
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+        </button>
+
+        <!-- Tool 7: Download Reference HTML -->
+        <button id="download-html-btn" class="dock-item relative w-11 h-11 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/30 flex items-center justify-center text-sky-300">
+            <span class="dock-tooltip absolute -top-9 left-1/2 px-2.5 py-1 rounded-lg glass-popover text-[10px] font-mono text-white whitespace-nowrap">Download Code</span>
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+        </button>
+    </nav>
+
+    <!-- Minimalist Floating Toast Notification (Above Dock) -->
+    <div id="toast-notification" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 glass-popover px-3.5 py-1.5 rounded-full text-[11px] font-mono text-sky-200 flex items-center gap-2 opacity-0 pointer-events-none transition-all duration-200 translate-y-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+        <span id="toast-message">Ready</span>
+    </div>
+
+    <script>
+        /**
+         * MINDCORPUS 3D NEURAL OS CANVAS
+         * Pure 3D brain visualization with full 360° click-and-drag orbit, zoom, and OS dock tools.
+         */
+        (function () {
+            // --- Application State & Parameters ---
+            const state = {
+                autoRotate: true,
+                pulseSpeed: 1.0,
+                glitterIntensity: 1.0,
+                pathwayDensity: 1.0,
+                paletteIndex: 0,
+                isDragging: false,
+                previousMouse: { x: 0, y: 0 },
+                userRotation: { x: 0.08, y: -0.35 },
+                angularVelocity: { x: 0, y: 0 },
+                targetZoom: 6.8,
+                currentZoom: 6.8,
+                activePopover: null
+            };
+
+            const palettes = [
+                {
+                    name: 'Cyan-Indigo',
+                    primary: new THREE.Color('#38bdf8'),
+                    secondary: new THREE.Color('#818cf8'),
+                    accent: new THREE.Color('#e0f2fe'),
+                    pulse: new THREE.Color('#7dd3fc')
+                },
+                {
+                    name: 'Bioluminescent Violet',
+                    primary: new THREE.Color('#c084fc'),
+                    secondary: new THREE.Color('#38bdf8'),
+                    accent: new THREE.Color('#f5d0fe'),
+                    pulse: new THREE.Color('#e879f9')
+                },
+                {
+                    name: 'Synaptic Emerald-Gold',
+                    primary: new THREE.Color('#34d399'),
+                    secondary: new THREE.Color('#fbbf24'),
+                    accent: new THREE.Color('#fef3c7'),
+                    pulse: new THREE.Color('#6ee7b7')
+                }
+            ];
+
+            // --- Toast Utility ---
+            let toastTimeout;
+            function showToast(msg) {
+                // Close any open dock popover so toast doesn't overlap
+                closeAllPopovers();
+                const toast = document.getElementById('toast-notification');
+                const label = document.getElementById('toast-message');
+                label.textContent = msg;
+                toast.classList.remove('opacity-0', 'translate-y-2');
+                toast.classList.add('opacity-100', 'translate-y-0');
+                clearTimeout(toastTimeout);
+                toastTimeout = setTimeout(() => {
+                    toast.classList.add('opacity-0', 'translate-y-2');
+                    toast.classList.remove('opacity-100', 'translate-y-0');
+                }, 2200);
+            }
+
+            // --- Scene, Camera, Renderer Setup ---
+            const container = document.getElementById('neural-canvas-container');
+            const scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x030407, 0.04);
+
+            const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 0.15, state.currentZoom);
+
+            const renderer = new THREE.WebGLRenderer({
+                antialias: true,
+                alpha: true,
+                preserveDrawingBuffer: true
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            // Centered 3D Brain Group
+            const brainGroup = new THREE.Group();
+            scene.add(brainGroup);
+
+            // --- Procedural 3D Brain Point Cloud Generator ---
+            function generateCorticalNodes(count) {
+                const positions = new Float32Array(count * 3);
+                const sizes = new Float32Array(count);
+                const phases = new Float32Array(count);
+                const colors = new Float32Array(count * 3);
+                const nodeVectors = [];
+                const lobeNames = [];
+
+                const currentPalette = palettes[state.paletteIndex];
+
+                for (let i = 0; i < count; i++) {
+                    const hemi = i % 2 === 0 ? 1 : -1;
+                    const u = Math.random();
+                    const v = Math.random();
+                    const theta = u * Math.PI * 2;
+                    const phi = Math.acos(2 * v - 1);
+
+                    const isSurface = Math.random() > 0.18;
+                    const rBase = isSurface ? (0.86 + Math.random() * 0.14) : (0.25 + Math.random() * 0.6);
+
+                    let x = Math.sin(phi) * Math.cos(theta);
+                    let y = Math.cos(phi);
+                    let z = Math.sin(phi) * Math.sin(theta);
+
+                    x *= 1.45;
+                    y *= 1.32;
+                    z *= 1.95;
+
+                    if (y < -0.2) {
+                        y *= 0.62;
+                    }
+
+                    if (z > 0.4) {
+                        x *= 1.0 - (z - 0.4) * 0.16;
+                        y *= 1.0 - (z - 0.4) * 0.10;
+                    }
+
+                    if (y < 0.05 && y > -0.75 && z > -0.6 && z < 0.65) {
+                        x += Math.sign(x) * 0.24 * Math.sin(((z + 0.6) / 1.25) * Math.PI);
+                        y -= 0.14;
+                    }
+
+                    let lobe = 'Parietal Cortex';
+                    if (z < -0.65 && y < -0.15) {
+                        x *= 0.78;
+                        y -= 0.25;
+                        z *= 0.92;
+                        lobe = 'Cerebellum';
+                    } else if (z > 0.55) {
+                        lobe = 'Prefrontal Cortex';
+                    } else if (z < -0.95) {
+                        lobe = 'Occipital Lobe';
+                    } else if (y < -0.1) {
+                        lobe = 'Temporal Lobe';
+                    }
+
+                    const foldFreq = 6.5;
+                    const folding = Math.sin(x * foldFreq + z * 4.0) * Math.cos(y * foldFreq - z * 3.5) * 0.065;
+                    const radialScale = rBase + (isSurface ? folding : 0);
+
+                    x *= radialScale;
+                    y *= radialScale;
+                    z *= radialScale;
+
+                    const medialGap = 0.08 + 0.06 * Math.max(0, y);
+                    x = Math.abs(x) * hemi + hemi * medialGap;
+
+                    positions[i * 3] = x;
+                    positions[i * 3 + 1] = y;
+                    positions[i * 3 + 2] = z;
+
+                    nodeVectors.push(new THREE.Vector3(x, y, z));
+                    lobeNames.push(`${hemi > 0 ? 'Right' : 'Left'} ${lobe}`);
+
+                    const isHub = Math.random() > 0.93;
+                    sizes[i] = isHub ? (2.6 + Math.random() * 2.2) : (0.7 + Math.random() * 1.4);
+                    phases[i] = Math.random() * Math.PI * 2;
+
+                    const mixRatio = (z + 2.0) / 4.0;
+                    const c = currentPalette.primary.clone().lerp(currentPalette.secondary, Math.max(0, Math.min(1, mixRatio)));
+                    if (isHub) c.lerp(currentPalette.accent, 0.65);
+
+                    colors[i * 3] = c.r;
+                    colors[i * 3 + 1] = c.g;
+                    colors[i * 3 + 2] = c.b;
+                }
+
+                return { positions, sizes, phases, colors, nodeVectors, lobeNames };
+            }
+
+            const NODE_COUNT = 4400;
+            const brainData = generateCorticalNodes(NODE_COUNT);
+
+            // Custom GLSL Shader for Glittering Cortical Nodes
+            const nodeGeometry = new THREE.BufferGeometry();
+            nodeGeometry.setAttribute('position', new THREE.BufferAttribute(brainData.positions, 3));
+            nodeGeometry.setAttribute('aSize', new THREE.BufferAttribute(brainData.sizes, 1));
+            nodeGeometry.setAttribute('aPhase', new THREE.BufferAttribute(brainData.phases, 1));
+            nodeGeometry.setAttribute('aColor', new THREE.BufferAttribute(brainData.colors, 3));
+
+            const nodeMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uGlitter: { value: 1.0 },
+                    uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
+                    uHoverPoint: { value: new THREE.Vector3(999, 999, 999) }
+                },
+                vertexShader: `
+                    attribute float aSize;
+                    attribute float aPhase;
+                    attribute vec3 aColor;
+                    uniform float uTime;
+                    uniform float uGlitter;
+                    uniform float uPixelRatio;
+                    uniform vec3 uHoverPoint;
+                    varying vec3 vColor;
+                    varying float vAlpha;
+
+                    void main() {
+                        vColor = aColor;
+                        vec3 pos = position;
+                        float wave = sin(uTime * 1.2 + aPhase) * 0.012;
+                        pos += normalize(position + vec3(0.001)) * wave;
+
+                        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                        
+                        float sparkle = 0.55 + 0.45 * sin(uTime * 2.8 + aPhase * 3.0);
+                        float flash = pow(max(0.0, sin(uTime * 1.9 + aPhase * 7.0)), 14.0) * 1.8;
+
+                        float distToHover = distance(position, uHoverPoint);
+                        float hoverBoost = smoothstep(0.95, 0.0, distToHover) * 2.2;
+
+                        float finalSize = aSize * (0.8 + sparkle * 0.5 + flash + hoverBoost) * uGlitter;
+                        gl_PointSize = finalSize * uPixelRatio * (14.0 / -mvPosition.z);
+                        
+                        vAlpha = clamp((0.35 + sparkle * 0.45 + flash * 0.6 + hoverBoost * 0.5) * uGlitter, 0.1, 1.0);
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    varying vec3 vColor;
+                    varying float vAlpha;
+
+                    void main() {
+                        vec2 coord = gl_PointCoord - vec2(0.5);
+                        float dist = length(coord);
+                        if (dist > 0.5) discard;
+
+                        float core = smoothstep(0.18, 0.0, dist);
+                        float halo = pow(1.0 - dist * 2.0, 2.2);
+                        float intensity = core * 1.4 + halo * 0.75;
+
+                        gl_FragColor = vec4(vColor * intensity + vec3(core * 0.4), vAlpha * halo);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+
+            const cortexPoints = new THREE.Points(nodeGeometry, nodeMaterial);
+            brainGroup.add(cortexPoints);
+
+            // --- Streaming Synaptic Pathways & Traveling Impulses ---
+            const MAX_PATHWAYS = 340;
+            const CURVE_SEGMENTS = 26;
+            const pathways = [];
+
+            const synapseLinePositions = new Float32Array(MAX_PATHWAYS * CURVE_SEGMENTS * 2 * 3);
+            const synapseLineAlphas = new Float32Array(MAX_PATHWAYS * CURVE_SEGMENTS * 2);
+
+            const synapseGeometry = new THREE.BufferGeometry();
+            synapseGeometry.setAttribute('position', new THREE.BufferAttribute(synapseLinePositions, 3));
+            synapseGeometry.setAttribute('aAlpha', new THREE.BufferAttribute(synapseLineAlphas, 1));
+
+            const synapseMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uColorPrimary: { value: palettes[0].primary.clone() },
+                    uColorSecondary: { value: palettes[0].secondary.clone() },
+                    uDensity: { value: 1.0 }
+                },
+                vertexShader: `
+                    attribute float aAlpha;
+                    varying float vAlpha;
+                    varying vec3 vPos;
+                    void main() {
+                        vAlpha = aAlpha;
+                        vPos = position;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 uColorPrimary;
+                    uniform vec3 uColorSecondary;
+                    uniform float uDensity;
+                    varying float vAlpha;
+                    varying vec3 vPos;
+                    void main() {
+                        if (vAlpha <= 0.005) discard;
+                        float mixFactor = clamp((vPos.z + 1.8) / 3.6, 0.0, 1.0);
+                        vec3 col = mix(uColorSecondary, uColorPrimary, mixFactor);
+                        gl_FragColor = vec4(col, vAlpha * uDensity);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+
+            const synapseLines = new THREE.LineSegments(synapseGeometry, synapseMaterial);
+            brainGroup.add(synapseLines);
+
+            // Traveling light-up synaptic pulse particles
+            const pulsePositions = new Float32Array(MAX_PATHWAYS * 3);
+            const pulseSizes = new Float32Array(MAX_PATHWAYS);
+            const pulseGeometry = new THREE.BufferGeometry();
+            pulseGeometry.setAttribute('position', new THREE.BufferAttribute(pulsePositions, 3));
+            pulseGeometry.setAttribute('aSize', new THREE.BufferAttribute(pulseSizes, 1));
+
+            const pulseMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uColor: { value: palettes[0].pulse.clone() },
+                    uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) }
+                },
+                vertexShader: `
+                    attribute float aSize;
+                    uniform float uPixelRatio;
+                    varying float vSize;
+                    void main() {
+                        vSize = aSize;
+                        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                        gl_PointSize = aSize * uPixelRatio * (22.0 / -mvPosition.z);
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 uColor;
+                    varying float vSize;
+                    void main() {
+                        if (vSize <= 0.01) discard;
+                        float d = length(gl_PointCoord - vec2(0.5));
+                        if (d > 0.5) discard;
+                        float glow = pow(1.0 - d * 2.0, 2.0);
+                        gl_FragColor = vec4(uColor + vec3(0.45 * glow), glow);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+
+            const pulsePoints = new THREE.Points(pulseGeometry, pulseMaterial);
+            brainGroup.add(pulsePoints);
+
+            function buildSynapticPathways() {
+                const nodes = brainData.nodeVectors;
+                for (let i = 0; i < MAX_PATHWAYS; i++) {
+                    const idxA = Math.floor(Math.random() * nodes.length);
+                    let idxB = Math.floor(Math.random() * nodes.length);
+
+                    const wantCross = i % 4 === 0;
+                    for (let attempt = 0; attempt < 25; attempt++) {
+                        const candidate = Math.floor(Math.random() * nodes.length);
+                        const dist = nodes[idxA].distanceTo(nodes[candidate]);
+                        const sameHemi = Math.sign(nodes[idxA].x) === Math.sign(nodes[candidate].x);
+
+                        if (!wantCross && sameHemi && dist > 0.45 && dist < 1.55) {
+                            idxB = candidate;
+                            break;
+                        } else if (wantCross && !sameHemi && dist > 0.5 && dist < 1.8) {
+                            idxB = candidate;
+                            break;
+                        }
+                    }
+
+                    const start = nodes[idxA];
+                    const end = nodes[idxB];
+                    const mid = start.clone().add(end).multiplyScalar(0.5);
+                    mid.multiplyScalar(wantCross ? 0.55 : 0.82);
+
+                    const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
+                    const sampledPoints = curve.getPoints(CURVE_SEGMENTS);
+
+                    pathways.push({
+                        points: sampledPoints,
+                        progress: Math.random(),
+                        speed: 0.25 + Math.random() * 0.55,
+                        active: Math.random() > 0.25,
+                        cooldown: Math.random() * 2.0,
+                        baseOpacity: 0.08 + Math.random() * 0.1
+                    });
+                }
+            }
+            buildSynapticPathways();
+
+            function triggerSynapticCascade(originPoint = null) {
+                pathways.forEach((p, idx) => {
+                    if (idx / MAX_PATHWAYS > state.pathwayDensity) return;
+                    if (originPoint) {
+                        const dist = p.points[0].distanceTo(originPoint);
+                        if (dist < 1.35) {
+                            p.active = true;
+                            p.progress = 0;
+                            p.speed = 0.75 + Math.random() * 0.5;
+                        }
+                    } else if (Math.random() > 0.35) {
+                        p.active = true;
+                        p.progress = Math.random() * 0.25;
+                    }
+                });
+            }
+
+            // --- Subtle Deep-Space Dust Particles ---
+            const dustCount = 360;
+            const dustPos = new Float32Array(dustCount * 3);
+            for (let i = 0; i < dustCount; i++) {
+                dustPos[i * 3] = (Math.random() - 0.5) * 24;
+                dustPos[i * 3 + 1] = (Math.random() - 0.5) * 16;
+                dustPos[i * 3 + 2] = (Math.random() - 0.5) * 18;
+            }
+            const dustGeo = new THREE.BufferGeometry();
+            dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+            const dustMat = new THREE.PointsMaterial({
+                color: 0x64748b,
+                size: 0.03,
+                transparent: true,
+                opacity: 0.3
+            });
+            const ambientDust = new THREE.Points(dustGeo, dustMat);
+            scene.add(ambientDust);
+
+            // --- Raycaster for Hover Glow & Click Firing ---
+            const raycaster = new THREE.Raycaster();
+            raycaster.params.Points.threshold = 0.22;
+            const mouseNDC = new THREE.Vector2(-99, -99);
+
+            function updateRaycasting() {
+                raycaster.setFromCamera(mouseNDC, camera);
+                const intersects = raycaster.intersectObject(cortexPoints);
+                if (intersects.length > 0) {
+                    const hit = intersects[0];
+                    const localPt = brainGroup.worldToLocal(hit.point.clone());
+                    nodeMaterial.uniforms.uHoverPoint.value.copy(localPt);
+                    return { point: localPt, lobe: brainData.lobeNames[hit.index] };
+                } else {
+                    nodeMaterial.uniforms.uHoverPoint.value.set(999, 999, 999);
+                    return null;
+                }
+            }
+
+            // --- 3D Click-and-Drag Rotation (with Inertial Momentum) & Scroll Wheel Zoom ---
+            let pointerDownPos = { x: 0, y: 0 };
+
+            container.addEventListener('pointerdown', (e) => {
+                closeAllPopovers();
+                state.isDragging = true;
+                state.previousMouse = { x: e.clientX, y: e.clientY };
+                pointerDownPos = { x: e.clientX, y: e.clientY };
+                state.angularVelocity = { x: 0, y: 0 };
+            });
+
+            window.addEventListener('pointermove', (e) => {
+                mouseNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
+                mouseNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+                if (state.isDragging) {
+                    const deltaX = e.clientX - state.previousMouse.x;
+                    const deltaY = e.clientY - state.previousMouse.y;
+
+                    const rotSpeed = 0.007;
+                    state.angularVelocity.y = deltaX * rotSpeed;
+                    state.angularVelocity.x = deltaY * rotSpeed;
+
+                    state.userRotation.y += state.angularVelocity.y;
+                    state.userRotation.x = Math.max(-1.35, Math.min(1.35, state.userRotation.x + state.angularVelocity.x));
+
+                    state.previousMouse = { x: e.clientX, y: e.clientY };
+                }
+            });
+
+            window.addEventListener('pointerup', (e) => {
+                if (!state.isDragging) return;
+                state.isDragging = false;
+
+                // Clean click on a brain node fires localized synapses
+                const distMoved = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+                if (distMoved < 6) {
+                    const hit = updateRaycasting();
+                    if (hit) {
+                        triggerSynapticCascade(hit.point);
+                        showToast(hit.lobe);
+                    }
+                }
+            });
+
+            // Smooth mouse wheel zoom
+            container.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                state.targetZoom = Math.max(3.6, Math.min(12.5, state.targetZoom + e.deltaY * 0.004));
+            }, { passive: false });
+
+            // --- OS Dock Popover & Tool Controls ---
+            const dockPopover = document.getElementById('dock-popover');
+            const toolPanels = document.querySelectorAll('.tool-panel');
+            const popoverTriggers = document.querySelectorAll('.dock-popover-trigger');
+
+            function closeAllPopovers() {
+                state.activePopover = null;
+                dockPopover.classList.add('opacity-0', 'pointer-events-none', 'translate-y-3');
+                dockPopover.classList.remove('opacity-100', 'pointer-events-auto', 'translate-y-0');
+                popoverTriggers.forEach(btn => btn.classList.remove('bg-white/15', 'border-sky-400/50'));
+            }
+
+            popoverTriggers.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const targetPanelId = btn.dataset.panel;
+
+                    if (state.activePopover === targetPanelId) {
+                        closeAllPopovers();
+                        return;
+                    }
+
+                    state.activePopover = targetPanelId;
+                    toolPanels.forEach(p => p.classList.add('hidden'));
+                    document.getElementById(targetPanelId).classList.remove('hidden');
+
+                    popoverTriggers.forEach(b => b.classList.remove('bg-white/15', 'border-sky-400/50'));
+                    btn.classList.add('bg-white/15', 'border-sky-400/50');
+
+                    dockPopover.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-3');
+                    dockPopover.classList.add('opacity-100', 'pointer-events-auto', 'translate-y-0');
+                });
+            });
+
+            // Tool 1: Auto-Spin Toggle
+            const autoRotateBtn = document.getElementById('dock-auto-rotate');
+            const autoRotateDot = document.getElementById('dot-auto-rotate');
+            const autoRotateTooltip = autoRotateBtn.querySelector('.dock-tooltip');
+
+            autoRotateBtn.addEventListener('click', () => {
+                state.autoRotate = !state.autoRotate;
+                if (state.autoRotate) {
+                    autoRotateBtn.className = 'dock-item relative w-11 h-11 rounded-xl bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-sky-300';
+                    autoRotateDot.classList.remove('hidden');
+                    autoRotateTooltip.textContent = 'Auto-Spin: ON';
+                } else {
+                    autoRotateBtn.className = 'dock-item relative w-11 h-11 rounded-xl bg-white/[0.04] hover:bg-white/10 border border-white/10 flex items-center justify-center text-slate-400';
+                    autoRotateDot.classList.add('hidden');
+                    autoRotateTooltip.textContent = 'Auto-Spin: OFF';
+                }
+            });
+
+            // Tool 2: Anatomical Camera Presets
+            document.querySelectorAll('.preset-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const preset = btn.dataset.preset;
+                    state.angularVelocity = { x: 0, y: 0 };
+                    if (preset === 'sagittal') {
+                        state.userRotation = { x: 0.04, y: Math.PI * 0.5 };
+                    } else if (preset === 'dorsal') {
+                        state.userRotation = { x: 1.25, y: 0 };
+                    } else if (preset === 'frontal') {
+                        state.userRotation = { x: 0.05, y: 0 };
+                    } else if (preset === 'reset') {
+                        state.userRotation = { x: 0.08, y: -0.35 };
+                        state.targetZoom = 6.8;
+                    }
+                    closeAllPopovers();
+                });
+            });
+
+            // Tool 3: Parameter Sliders
+            document.getElementById('slider-pulse-speed').addEventListener('input', (e) => {
+                state.pulseSpeed = parseFloat(e.target.value);
+                document.getElementById('val-pulse-speed').textContent = state.pulseSpeed.toFixed(1) + 'x';
+            });
+
+            document.getElementById('slider-glitter').addEventListener('input', (e) => {
+                state.glitterIntensity = parseFloat(e.target.value);
+                nodeMaterial.uniforms.uGlitter.value = state.glitterIntensity;
+                document.getElementById('val-glitter').textContent = state.glitterIntensity.toFixed(1);
+            });
+
+            document.getElementById('slider-density').addEventListener('input', (e) => {
+                state.pathwayDensity = parseFloat(e.target.value);
+                synapseMaterial.uniforms.uDensity.value = state.pathwayDensity;
+                document.getElementById('val-density').textContent = Math.round(state.pathwayDensity * 100) + '%';
+            });
+
+            // Tool 4: Fire Synaptic Cascade
+            document.getElementById('trigger-burst-btn').addEventListener('click', () => {
+                triggerSynapticCascade();
+                showToast('Synaptic Cascade');
+            });
+
+            // Tool 5: Cycle Neural Spectrum
+            document.getElementById('cycle-palette-btn').addEventListener('click', () => {
+                state.paletteIndex = (state.paletteIndex + 1) % palettes.length;
+                const pal = palettes[state.paletteIndex];
+
+                synapseMaterial.uniforms.uColorPrimary.value.copy(pal.primary);
+                synapseMaterial.uniforms.uColorSecondary.value.copy(pal.secondary);
+                pulseMaterial.uniforms.uColor.value.copy(pal.pulse);
+
+                const colorAttr = nodeGeometry.getAttribute('aColor');
+                for (let i = 0; i < NODE_COUNT; i++) {
+                    const z = brainData.positions[i * 3 + 2];
+                    const mixRatio = Math.max(0, Math.min(1, (z + 2.0) / 4.0));
+                    const c = pal.primary.clone().lerp(pal.secondary, mixRatio);
+                    colorAttr.setXYZ(i, c.r, c.g, c.b);
+                }
+                colorAttr.needsUpdate = true;
+                showToast(pal.name);
+            });
+
+            // Tool 6: PNG Snapshot
+            document.getElementById('capture-png-btn').addEventListener('click', () => {
+                renderer.render(scene, camera);
+                const dataURL = renderer.domElement.toDataURL('image/png');
+                const link = document.createElement('a');
+                link.download = `mindcorpus-brain-${Date.now()}.png`;
+                link.href = dataURL;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                showToast('PNG Captured');
+            });
+
+            // Tool 7: Download Reference HTML
+            document.getElementById('download-html-btn').addEventListener('click', () => {
+                const htmlContent = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+                const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'mindcorpus-3d-brain-os.html';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                showToast('Reference Downloaded');
+            });
+
+            // --- Resize Handling ---
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                const pr = Math.min(window.devicePixelRatio, 2);
+                renderer.setPixelRatio(pr);
+                nodeMaterial.uniforms.uPixelRatio.value = pr;
+                pulseMaterial.uniforms.uPixelRatio.value = pr;
+            });
+
+            // --- Main Animation Loop ---
+            const clock = new THREE.Clock();
+
+            function animate() {
+                requestAnimationFrame(animate);
+
+                const dt = Math.min(clock.getDelta(), 0.05);
+                const elapsed = clock.getElapsedTime();
+
+                nodeMaterial.uniforms.uTime.value = elapsed;
+
+                // Smooth camera zoom
+                state.currentZoom += (state.targetZoom - state.currentZoom) * 0.08;
+                camera.position.set(0, 0.12, state.currentZoom);
+                camera.lookAt(0, 0, 0);
+
+                // Smooth 3D rotation with inertia & optional gentle auto-spin
+                if (!state.isDragging) {
+                    state.userRotation.y += state.angularVelocity.y;
+                    state.userRotation.x = Math.max(-1.35, Math.min(1.35, state.userRotation.x + state.angularVelocity.x));
+                    state.angularVelocity.x *= 0.92;
+                    state.angularVelocity.y *= 0.92;
+
+                    if (state.autoRotate) {
+                        state.userRotation.y += dt * 0.18;
+                    }
+                }
+
+                brainGroup.rotation.y += (state.userRotation.y - brainGroup.rotation.y) * 0.14;
+                brainGroup.rotation.x += (state.userRotation.x - brainGroup.rotation.x) * 0.14;
+
+                ambientDust.rotation.y = elapsed * 0.015;
+
+                // Update streaming synaptic pathways & light-up pulses
+                const posAttr = synapseGeometry.getAttribute('position');
+                const alphaAttr = synapseGeometry.getAttribute('aAlpha');
+                const pulsePosAttr = pulseGeometry.getAttribute('position');
+                const pulseSizeAttr = pulseGeometry.getAttribute('aSize');
+
+                let lineVertexIdx = 0;
+
+                for (let i = 0; i < MAX_PATHWAYS; i++) {
+                    const p = pathways[i];
+                    const isEnabled = (i / MAX_PATHWAYS) <= state.pathwayDensity;
+
+                    if (!isEnabled) {
+                        for (let s = 0; s < CURVE_SEGMENTS; s++) {
+                            alphaAttr.setX(lineVertexIdx++, 0);
+                            alphaAttr.setX(lineVertexIdx++, 0);
+                        }
+                        pulseSizeAttr.setX(i, 0);
+                        continue;
+                    }
+
+                    if (p.active) {
+                        p.progress += dt * p.speed * state.pulseSpeed;
+                        if (p.progress >= 1.25) {
+                            p.active = false;
+                            p.cooldown = 0.4 + Math.random() * 2.6;
+                        }
+                    } else {
+                        p.cooldown -= dt * state.pulseSpeed;
+                        if (p.cooldown <= 0) {
+                            p.active = true;
+                            p.progress = 0;
+                        }
+                    }
+
+                    for (let s = 0; s < CURVE_SEGMENTS; s++) {
+                        const ptA = p.points[s];
+                        const ptB = p.points[s + 1];
+                        const segNorm = s / CURVE_SEGMENTS;
+
+                        posAttr.setXYZ(lineVertexIdx, ptA.x, ptA.y, ptA.z);
+                        posAttr.setXYZ(lineVertexIdx + 1, ptB.x, ptB.y, ptB.z);
+
+                        let alpha = p.baseOpacity;
+                        if (p.active) {
+                            const distBehind = p.progress - segNorm;
+                            if (distBehind >= 0 && distBehind < 0.35) {
+                                const trail = 1.0 - (distBehind / 0.35);
+                                alpha += Math.pow(trail, 1.6) * 0.85;
+                            }
+                        }
+
+                        alphaAttr.setX(lineVertexIdx, alpha);
+                        alphaAttr.setX(lineVertexIdx + 1, alpha);
+                        lineVertexIdx += 2;
+                    }
+
+                    if (p.active && p.progress >= 0 && p.progress <= 1.0) {
+                        const exactIdx = p.progress * CURVE_SEGMENTS;
+                        const lowIdx = Math.floor(exactIdx);
+                        const highIdx = Math.min(CURVE_SEGMENTS, lowIdx + 1);
+                        const frac = exactIdx - lowIdx;
+
+                        const headPos = p.points[lowIdx].clone().lerp(p.points[highIdx], frac);
+                        pulsePosAttr.setXYZ(i, headPos.x, headPos.y, headPos.z);
+                        pulseSizeAttr.setX(i, 1.8 * Math.sin(p.progress * Math.PI));
+                    } else {
+                        pulseSizeAttr.setX(i, 0);
+                    }
+                }
+
+                posAttr.needsUpdate = true;
+                alphaAttr.needsUpdate = true;
+                pulsePosAttr.needsUpdate = true;
+                pulseSizeAttr.needsUpdate = true;
+
+                updateRaycasting();
+                renderer.render(scene, camera);
+            }
+
+            window.onload = function () {
+                animate();
+            };
+        })();
+    </script>
+</body>
+</html>

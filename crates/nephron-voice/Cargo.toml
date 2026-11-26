@@ -1,0 +1,11 @@
+[package]
+name = "nephron-voice"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+reqwest.workspace = true
+serde.workspace = true
