@@ -4,3 +4,4 @@
 *.db-wal
 *.db-shm
 .myelin-graph.tsv
+vendor/

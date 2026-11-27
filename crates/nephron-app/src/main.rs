@@ -33,12 +33,22 @@ fn main() -> eframe::Result<()> {
             return Ok(());
         }
         Some("--pet-only") => {
-            let client = CynapseClient::new(endpoint).expect("valid cynapse endpoint");
             let sp = std::env::args()
                 .nth(2)
                 .map(|s| nephron_pets::PetSpecies::from_arg(&s))
                 .unwrap_or(nephron_pets::PetSpecies::Chiba);
-            return overlays::run_pet_only(rt, client, sp);
+            let kind = match std::env::args().nth(3).as_deref() {
+                Some("ollama") => nephron_bridge::BackendKind::Ollama,
+                _ => nephron_bridge::BackendKind::Cynapse,
+            };
+            let pet_url = std::env::args()
+                .nth(4)
+                .unwrap_or_else(|| kind.default_url().to_string());
+            let pet_model = std::env::args()
+                .nth(5)
+                .unwrap_or_else(|| nephron_bridge::ModelProfile::MiniCpm5_1B.id().to_string());
+            let client = CynapseClient::with_kind(pet_url, kind).expect("valid pet endpoint");
+            return overlays::run_pet_only(rt, client, sp, pet_model);
         }
         Some("--swarm-only") => {
             return overlays::run_swarm_only();

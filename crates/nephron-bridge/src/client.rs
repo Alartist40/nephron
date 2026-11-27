@@ -44,7 +44,8 @@ struct ChatRequest<'a> {
     model: &'a str,
     messages: &'a [ChatMessage],
     stream: bool,
-    reasoning_effort: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'a str>,
 }
 
 impl CynapseClient {
@@ -110,11 +111,15 @@ impl CynapseClient {
         messages: Vec<ChatMessage>,
         tx: mpsc::UnboundedSender<StreamEvent>,
     ) {
+        let reasoning_effort = match self.kind {
+            BackendKind::Cynapse => Some(effort.as_str()),
+            BackendKind::Ollama => None,
+        };
         let body = ChatRequest {
             model: model_id,
             messages: &messages,
             stream: true,
-            reasoning_effort: effort.as_str(),
+            reasoning_effort,
         };
         self.post_sse(&body, tx).await;
     }
@@ -126,13 +131,7 @@ impl CynapseClient {
         messages: Vec<ChatMessage>,
         tx: mpsc::UnboundedSender<StreamEvent>,
     ) {
-        let body = ChatRequest {
-            model: model.id(),
-            messages: &messages,
-            stream: true,
-            reasoning_effort: effort.as_str(),
-        };
-        self.post_sse(&body, tx).await;
+        self.stream_chat_model(model.id(), effort, messages, tx).await;
     }
 
     pub async fn stream_audio_prompt(
@@ -142,10 +141,19 @@ impl CynapseClient {
         wav_b64: String,
         tx: mpsc::UnboundedSender<StreamEvent>,
     ) {
-        let body = serde_json::json!({
-            "model": model.id(),
+        self.stream_audio_prompt_model(model.id(), effort, wav_b64, tx).await;
+    }
+
+    pub async fn stream_audio_prompt_model(
+        &self,
+        model_id: &str,
+        effort: EffortLevel,
+        wav_b64: String,
+        tx: mpsc::UnboundedSender<StreamEvent>,
+    ) {
+        let mut body = serde_json::json!({
+            "model": model_id,
             "stream": true,
-            "reasoning_effort": effort.as_str(),
             "messages": [{
                 "role": "user",
                 "content": [
@@ -154,6 +162,9 @@ impl CynapseClient {
                 ]
             }]
         });
+        if self.kind == BackendKind::Cynapse {
+            body["reasoning_effort"] = serde_json::json!(effort.as_str());
+        }
         self.post_sse(&body, tx).await;
     }
 
@@ -163,7 +174,15 @@ impl CynapseClient {
         let resp = match self.http.post(url).json(body).send().await {
             Ok(r) if r.status().is_success() => r,
             Ok(r) => {
-                let _ = tx.send(StreamEvent::Error(format!("HTTP {}", r.status())));
+                let status = r.status();
+                let detail = r.text().await.unwrap_or_default();
+                let short: String = detail.chars().take(180).collect();
+                let msg = if short.is_empty() {
+                    format!("HTTP {status}")
+                } else {
+                    format!("HTTP {status}: {short}")
+                };
+                let _ = tx.send(StreamEvent::Error(msg));
                 return;
             }
             Err(e) => {
@@ -191,6 +210,13 @@ impl CynapseClient {
                     tokens += 1;
                     let _ = tx.send(StreamEvent::Delta(delta));
                 }
+            }
+        }
+        let trailing = buf.trim();
+        if !trailing.is_empty() {
+            if let Some(delta) = parse_sse_line(trailing) {
+                tokens += 1;
+                let _ = tx.send(StreamEvent::Delta(delta));
             }
         }
         let elapsed = started.elapsed().as_secs_f32().max(0.001);

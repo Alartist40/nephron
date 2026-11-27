@@ -1,7 +1,7 @@
 //! Standalone always-on-top overlay processes for Desktop Pet and Swarm Cursors.
 
 use eframe::egui;
-use nephron_bridge::{ChatMessage, ChatRole, CynapseClient, EffortLevel, ModelProfile, StreamEvent};
+use nephron_bridge::{ChatMessage, ChatRole, CynapseClient, EffortLevel, StreamEvent};
 use nephron_pets::{widget::PetRenderer, PetCompanion, PetMood, PetSpecies};
 use nephron_swarm::{canvas::draw_swarm_overlay, SwarmCanvas};
 use std::process::{Child, Command};
@@ -9,14 +9,9 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
+#[derive(Default)]
 pub struct OverlayChild {
     child: Option<Child>,
-}
-
-impl Default for OverlayChild {
-    fn default() -> Self {
-        Self { child: None }
-    }
 }
 
 pub fn set_pet_mood_hint(mood: &str) {
@@ -58,7 +53,7 @@ impl Drop for OverlayChild {
     }
 }
 
-pub fn run_pet_only(rt: Runtime, client: CynapseClient, species: PetSpecies) -> eframe::Result<()> {
+pub fn run_pet_only(rt: Runtime, client: CynapseClient, species: PetSpecies, model_id: String) -> eframe::Result<()> {
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Nephron Pet")
@@ -68,12 +63,15 @@ pub fn run_pet_only(rt: Runtime, client: CynapseClient, species: PetSpecies) -> 
             .with_inner_size([260.0, 260.0]),
         ..Default::default()
     };
-    let mut pet = PetCompanion::default();
-    pet.species = species;
+    let mut pet = PetCompanion {
+        species,
+        ..Default::default()
+    };
     pet.say(species.greet(), 3.5);
     let app = PetOnlyApp {
         rt,
         client,
+        model_id,
         pet,
         renderer: PetRenderer::default(),
         rx: None,
@@ -87,6 +85,7 @@ pub fn run_pet_only(rt: Runtime, client: CynapseClient, species: PetSpecies) -> 
 struct PetOnlyApp {
     rt: Runtime,
     client: CynapseClient,
+    model_id: String,
     pet: PetCompanion,
     renderer: PetRenderer,
     rx: Option<mpsc::UnboundedReceiver<StreamEvent>>,
@@ -150,18 +149,21 @@ impl eframe::App for PetOnlyApp {
 impl PetOnlyApp {
     fn ask(&mut self, sp: PetSpecies, prompt: String) {
         self.buf.clear();
+        let persona = match sp {
+            PetSpecies::Cat => "You are a witty, observant desktop Cat companion. Reply in 1 short sentence.",
+            PetSpecies::Chiba => "You are a cheerful, loyal desktop Chiba Dog companion. Reply in 1 short sentence.",
+            PetSpecies::Sheep => "You are a calm, dreamy desktop Sheep companion. Reply in 1 short sentence.",
+        };
         let msgs = vec![
-            ChatMessage {
-                role: ChatRole::System,
-                content: format!("You are a concise desktop {} companion. Reply in 1 short sentence.", sp.name()),
-            },
+            ChatMessage { role: ChatRole::System, content: persona.into() },
             ChatMessage { role: ChatRole::User, content: prompt },
         ];
         let (tx, rx) = mpsc::unbounded_channel();
         self.rx = Some(rx);
         let client = self.client.clone();
+        let model_id = self.model_id.clone();
         self.rt.spawn(async move {
-            client.stream_chat(ModelProfile::MiniCpm5_1B, EffortLevel::None, msgs, tx).await;
+            client.stream_chat_model(&model_id, EffortLevel::None, msgs, tx).await;
         });
     }
 }

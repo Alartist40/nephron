@@ -66,6 +66,52 @@ impl StlMesh {
         }
         Ok(Self { triangles })
     }
+
+    pub fn bounds(&self) -> Option<([f32; 3], [f32; 3])> {
+        let first = self.triangles.first()?.verts[0];
+        let (mut min, mut max) = (first, first);
+        for tri in &self.triangles {
+            for v in tri.verts {
+                for k in 0..3 {
+                    min[k] = min[k].min(v[k]);
+                    max[k] = max[k].max(v[k]);
+                }
+            }
+        }
+        Some((min, max))
+    }
+
+    pub fn dimensions(&self) -> [f32; 3] {
+        match self.bounds() {
+            Some((min, max)) => [max[0] - min[0], max[1] - min[1], max[2] - min[2]],
+            None => [0.0, 0.0, 0.0],
+        }
+    }
+
+    pub fn merge(&mut self, mut other: StlMesh) {
+        self.triangles.append(&mut other.triangles);
+    }
+
+    pub fn to_binary_stl(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(84 + self.triangles.len() * 50);
+        let mut header = [0u8; 80];
+        let tag = b"nephron-rust-cad";
+        header[..tag.len()].copy_from_slice(tag);
+        out.extend_from_slice(&header);
+        out.extend_from_slice(&(self.triangles.len() as u32).to_le_bytes());
+        for tri in &self.triangles {
+            for f in tri.normal {
+                out.extend_from_slice(&f.to_le_bytes());
+            }
+            for v in tri.verts {
+                for f in v {
+                    out.extend_from_slice(&f.to_le_bytes());
+                }
+            }
+            out.extend_from_slice(&0u16.to_le_bytes());
+        }
+        out
+    }
 }
 
 /// Generates a centered 12-triangle rectangular prism STL mesh (in mm).

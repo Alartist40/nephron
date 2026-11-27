@@ -8,6 +8,9 @@ members = [
     "crates/nephron-cad",
     "crates/nephron-app",
 ]
+exclude = [
+    "vendor/pocket-tts/rust",
+]
 
 [workspace.package]
 version = "0.1.0"

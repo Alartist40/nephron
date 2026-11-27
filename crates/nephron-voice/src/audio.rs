@@ -99,6 +99,9 @@ pub fn play_wav_bytes(wav: &[u8]) -> Result<()> {
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(wav)?;
     }
-    let _ = child.wait();
+    let status = child.wait()?;
+    if !status.success() {
+        anyhow::bail!("aplay exited with {status}");
+    }
     Ok(())
 }

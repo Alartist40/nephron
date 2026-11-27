@@ -60,9 +60,13 @@ impl WebSearcher {
             .into_iter()
             .take(limit)
             .filter_map(|r| {
+                let url = r.get("url")?.as_str()?;
+                if !is_safe_http_url(url) {
+                    return None;
+                }
                 Some(SearchResult {
                     title: r.get("title")?.as_str()?.to_string(),
-                    url: r.get("url")?.as_str()?.to_string(),
+                    url: url.to_string(),
                     snippet: r.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string(),
                 })
             })
@@ -96,11 +100,15 @@ pub fn parse_ddg_html(html: &str, limit: usize) -> Vec<SearchResult> {
             .and_then(|s| extract_between(s, ">", "</a>").or_else(|| extract_between(s, ">", "</span>")))
             .map(strip_tags)
             .unwrap_or_default();
-        if !title.is_empty() && !url.is_empty() {
+        if !title.is_empty() && is_safe_http_url(url) {
             results.push(SearchResult { title, url: url.to_string(), snippet });
         }
     }
     results
+}
+
+fn is_safe_http_url(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("http://")
 }
 
 pub fn format_citations_prompt(query: &str, results: &[SearchResult]) -> String {

@@ -1708,6 +1708,7 @@ dependencies = [
  "base64 0.22.1",
  "reqwest",
  "serde",
+ "tokio",
 ]
 
 [[package]]

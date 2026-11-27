@@ -12,6 +12,7 @@ pub struct MemoryRecord {
     pub kind: String,
     pub content: String,
     pub created_at: String,
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,7 +49,8 @@ impl MemoryStore {
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                  kind TEXT NOT NULL,
                  content TEXT NOT NULL,
-                 created_at TEXT NOT NULL
+                 created_at TEXT NOT NULL,
+                 pinned INTEGER NOT NULL DEFAULT 0
              );
              CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
                  content, content='memories', content_rowid='id'
@@ -64,6 +66,7 @@ impl MemoryStore {
                  scad_path TEXT NOT NULL
              );",
         )?;
+        let _ = conn.execute("ALTER TABLE memories ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0", []);
         Ok(Self { conn })
     }
 
@@ -78,7 +81,7 @@ impl MemoryStore {
 
     pub fn recent_memories(&self, limit: usize) -> Result<Vec<MemoryRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, kind, content, created_at FROM memories ORDER BY id DESC LIMIT ?1",
+            "SELECT id, kind, content, created_at, pinned FROM memories ORDER BY pinned DESC, id DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit as i64], |r| {
             Ok(MemoryRecord {
@@ -86,17 +89,22 @@ impl MemoryStore {
                 kind: r.get(1)?,
                 content: r.get(2)?,
                 created_at: r.get(3)?,
+                pinned: r.get::<_, i64>(4).unwrap_or(0) != 0,
             })
         })?;
         Ok(rows.filter_map(Result::ok).collect())
     }
 
     pub fn search_fts(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
-        let safe = format!("\"{}\"", query.replace('"', "\"\""));
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return self.recent_memories(limit);
+        }
+        let safe = format!("\"{}\"", trimmed.replace('"', "\"\""));
         let mut stmt = self.conn.prepare(
-            "SELECT m.id, m.kind, m.content, m.created_at
+            "SELECT m.id, m.kind, m.content, m.created_at, m.pinned
              FROM memories_fts f JOIN memories m ON m.id = f.rowid
-             WHERE memories_fts MATCH ?1 ORDER BY bm25(memories_fts) LIMIT ?2",
+             WHERE memories_fts MATCH ?1 ORDER BY m.pinned DESC, bm25(memories_fts) LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![safe, limit as i64], |r| {
             Ok(MemoryRecord {
@@ -104,9 +112,24 @@ impl MemoryStore {
                 kind: r.get(1)?,
                 content: r.get(2)?,
                 created_at: r.get(3)?,
+                pinned: r.get::<_, i64>(4).unwrap_or(0) != 0,
             })
         })?;
         Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    pub fn pin_memory(&self, id: i64, pinned: bool) -> Result<()> {
+        self.conn.execute(
+            "UPDATE memories SET pinned = ?1 WHERE id = ?2",
+            params![i64::from(pinned), id],
+        )?;
+        Ok(())
+    }
+
+    pub fn clear_unpinned(&self) -> Result<usize> {
+        let n = self.conn.execute("DELETE FROM memories WHERE pinned = 0", [])?;
+        let _ = self.conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')", []);
+        Ok(n)
     }
 
     pub fn save_part(&self, name: &str, material: &str, quantity: i32, scad_path: &str) -> Result<i64> {

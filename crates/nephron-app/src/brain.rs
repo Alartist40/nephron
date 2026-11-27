@@ -108,8 +108,8 @@ impl BrainAtlas {
         self.pathways.clear();
         self.dust.clear();
 
-        // 2,000 fine pinprick cortical stars
-        let count = 2000usize;
+        // 900 fine pinprick cortical stars (fast 2-tri quads)
+        let count = 900usize;
         for i in 0..count {
             let hemi = if i % 2 == 0 { 1.0f32 } else { -1.0f32 };
             let theta = hash01(i, 1) * TAU;
@@ -188,11 +188,11 @@ impl BrainAtlas {
             let mid_scale = if want_cross { 0.55 } else { 0.82 };
             let mid = [(a[0] + b[0]) * 0.5 * mid_scale, (a[1] + b[1]) * 0.5 * mid_scale, (a[2] + b[2]) * 0.5 * mid_scale];
             let mut pts = [[0.0f32; 3]; 8];
-            for s in 0..8 {
+            for (s, pt) in pts.iter_mut().enumerate() {
                 let t = s as f32 / 7.0;
                 let u = 1.0 - t;
                 for k in 0..3 {
-                    pts[s][k] = u * u * a[k] + 2.0 * u * t * mid[k] + t * t * b[k];
+                    pt[k] = u * u * a[k] + 2.0 * u * t * mid[k] + t * t * b[k];
                 }
             }
             self.pathways.push(SynapticPathway {
@@ -222,21 +222,27 @@ impl BrainAtlas {
         }
     }
 
-    pub fn paint(&mut self, ui: &mut egui::Ui, rect: Rect, dt: f32, activity: BrainActivity, raw_energy: f32) {
+    pub fn paint(&mut self, ui: &mut egui::Ui, rect: Rect, dt: f32, activity: BrainActivity, raw_energy: f32) -> (Option<String>, bool) {
         let resp = ui.interact(rect, ui.id().with("brain_bg"), egui::Sense::click_and_drag());
+        let mut interacting = false;
         if resp.dragged() {
             let d = resp.drag_delta();
             self.yaw += d.x * 0.006;
             self.pitch = (self.pitch + d.y * 0.006).clamp(-1.35, 1.35);
+            interacting = true;
         } else if self.auto_rotate {
             self.yaw += dt * (0.14 + self.energy * 0.25);
         }
-        if resp.clicked() {
+        let clicked_label = if resp.clicked() {
             self.trigger_cascade();
-        }
+            self.hovered_label.clone()
+        } else {
+            None
+        };
         let scroll = ui.input(|i| i.smooth_scroll_delta.y);
         if resp.hovered() && scroll.abs() > 0.0 {
             self.zoom = (self.zoom * (1.0 + scroll * 0.002)).clamp(0.5, 2.5);
+            interacting = true;
         }
 
         self.energy += (raw_energy.clamp(0.0, 1.0) - self.energy) * (1.0 - (-dt / 0.14).exp());
@@ -317,9 +323,17 @@ impl BrainAtlas {
         self.hovered_label = None;
         for n in &self.nodes {
             let (p, depth) = project(n.pos);
+            if !rect.contains(p) {
+                continue;
+            }
             let sparkle = 0.55 + 0.45 * (self.time * 2.8 + n.phase * 3.0).sin();
-            let flash = (self.time * 1.9 + n.phase * 7.0).sin().max(0.0).powi(14) * 1.8;
+            let flash = if (self.time * 1.9 + n.phase * 7.0).sin() > 0.85 {
+                (self.time * 1.9 + n.phase * 7.0).sin().powi(6) * 1.6
+            } else {
+                0.0
+            };
             let hover_boost = pointer
+                .filter(|ptr| (p.x - ptr.x).abs() < 72.0 && (p.y - ptr.y).abs() < 72.0)
                 .map(|ptr| (1.0 - p.distance(ptr) / 72.0).max(0.0).powi(2) * 1.6)
                 .unwrap_or(0.0);
 
@@ -334,10 +348,10 @@ impl BrainAtlas {
             if hover_boost > 0.3 || (n.is_hub && flash > 0.8) {
                 painter.circle_filled(p, sz * 2.4, Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (alpha * 42.0) as u8));
             }
-            painter.rect_filled(Rect::from_center_size(p, egui::vec2(sz, sz)), sz * 0.35, c);
+            painter.rect_filled(Rect::from_center_size(p, egui::vec2(sz, sz)), 0.0, c);
 
             if let (Some(lbl), Some(ptr)) = (&n.label, pointer) {
-                if p.distance(ptr) < 14.0 {
+                if (p.x - ptr.x).abs() < 14.0 && (p.y - ptr.y).abs() < 14.0 && p.distance(ptr) < 14.0 {
                     self.hovered_label = Some(lbl.clone());
                 }
             }
@@ -352,6 +366,7 @@ impl BrainAtlas {
                 Color32::from_rgb(224, 242, 254),
             );
         }
+        (clicked_label, interacting)
     }
 }
 

@@ -1,6 +1,6 @@
 # Nephron — Architecture & Step-by-Step Build Plan
 
-> **Implementation Status:** Phases 1–6 implemented and verified (`cargo test --workspace` 14/14 passing, release binary installed via `install.sh`). See [`README.md`](README.md) and [`GATES.md`](GATES.md).
+> **Implementation Status:** Phases 1–7 implemented and verified (`cargo test --workspace` 16/16 passing, zero clippy warnings, release binary built & portable `run.sh` / `install.sh` ready). See [`README.md`](README.md) and [`GATES.md`](GATES.md).
 
 **Target Hardware:** Orange Pi 6 Plus (`aarch64`, ARMv9.2-A, 14 GiB LPDDR5, 0 B swap) & Desktop Linux/macOS/Windows  
 **Core Foundation:** [`Alartist40/cynapse-harness`](https://github.com/Alartist40/cynapse-harness) (`cynapse-engine`, `cynapse-memory` / Dendrite, `llama-server` daemon on `:38265`)  
