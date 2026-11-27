@@ -1,5 +1,6 @@
 //! Interface Studio Modal: Cortex Studio, HabitRPG, and Engine & TTS Settings.
 
+use crate::a2ui::{A2uiAction, A2uiKeyValue, A2uiMetric, A2uiSection, A2uiSurface};
 use eframe::egui::{self, Color32, Frame, Stroke};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -46,6 +47,8 @@ pub struct StudioChatMsg {
     pub user: bool,
     pub text: String,
     pub citations: Vec<String>,
+    #[serde(default)]
+    pub surface: Option<A2uiSurface>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -536,10 +539,69 @@ pub fn parse_studio_synthesis(raw: &str, studio: &mut StudioState) -> Vec<(Strin
     }
 
     let cites: Vec<String> = studio.active_sources().iter().take(2).map(|s| s.title.clone()).collect();
+    let surface = if !nodes.is_empty() {
+        Some(A2uiSurface {
+            title: "Synthesis Dashboard".into(),
+            subtitle: Some(answer.clone()),
+            badge: Some("A2UI".into()),
+            metrics: vec![
+                A2uiMetric {
+                    label: "Brain Nodes".into(),
+                    value: nodes.len().to_string(),
+                    delta: Some("planted".into()),
+                    tone: Some("amber".into()),
+                },
+                A2uiMetric {
+                    label: "Flashcards".into(),
+                    value: studio.flashcards.len().to_string(),
+                    delta: Some("ready".into()),
+                    tone: Some("sky".into()),
+                },
+                A2uiMetric {
+                    label: "Quiz".into(),
+                    value: studio.quiz.len().to_string(),
+                    delta: Some("+XP".into()),
+                    tone: Some("emerald".into()),
+                },
+            ],
+            sections: vec![A2uiSection {
+                title: "Extracted Memory Nodes".into(),
+                items: nodes
+                    .iter()
+                    .map(|(k, v)| A2uiKeyValue {
+                        key: k.clone(),
+                        value: v.clone(),
+                    })
+                    .collect(),
+            }],
+            checklist: Vec::new(),
+            table: None,
+            actions: vec![
+                A2uiAction {
+                    label: "Open Flashcards".into(),
+                    prompt: None,
+                    kind: Some("stage:flashcards".into()),
+                },
+                A2uiAction {
+                    label: "Take Quiz (+XP)".into(),
+                    prompt: None,
+                    kind: Some("stage:quiz".into()),
+                },
+                A2uiAction {
+                    label: "Concept Tree".into(),
+                    prompt: None,
+                    kind: Some("stage:mindmap".into()),
+                },
+            ],
+        })
+    } else {
+        A2uiSurface::parse_from_text(&answer).or_else(|| A2uiSurface::from_markdown_heuristic(&answer))
+    };
     studio.chat.push(StudioChatMsg {
         user: false,
         text: answer,
         citations: cites,
+        surface,
     });
     nodes
 }

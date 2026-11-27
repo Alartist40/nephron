@@ -780,6 +780,7 @@ impl NephronApp {
                             user: false,
                             text: format!("[backend error] {e}"),
                             citations: Vec::new(),
+                            surface: None,
                         });
                         studio_done = true;
                     }
@@ -838,10 +839,10 @@ impl NephronApp {
 
 fn kinetic_glass() -> Frame {
     Frame::NONE
-        .fill(Color32::from_rgba_unmultiplied(10, 14, 24, 200))
+        .fill(Color32::from_rgba_unmultiplied(10, 14, 24, 212))
         .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 28)))
-        .corner_radius(20.0)
-        .inner_margin(12.0)
+        .corner_radius(22.0)
+        .inner_margin(16.0)
 }
 
 fn kinetic_dock_frame() -> Frame {
@@ -1419,14 +1420,16 @@ impl eframe::App for NephronApp {
             });
 
         // 4. Bottom-Right Living Bubble Head Companion + Expandable Universal Chat Popover
-        if self.bubble_open {
+        if self.bubble_open && !self.studio.open {
             egui::Area::new(egui::Id::new("bubble_popover"))
                 .anchor(Align2::RIGHT_BOTTOM, [-20.0, -86.0])
                 .show(ctx, |ui| {
                     kinetic_glass().show(ui, |ui| {
-                        ui.set_width(320.0);
+                        ui.set_width(340.0);
+                        ui.spacing_mut().item_spacing.y = 6.0;
                         let mut ctx_action: Option<(u8, String)> = None;
-                        egui::ScrollArea::vertical().max_height(210.0).stick_to_bottom(true).show(ui, |ui| {
+                        let mut a2ui_prompt: Option<String> = None;
+                        egui::ScrollArea::vertical().max_height(240.0).stick_to_bottom(true).show(ui, |ui| {
                             for m in &self.messages {
                                 let (who, col) = match m.role {
                                     ChatRole::User => ("You", Color32::from_rgb(125, 211, 252)),
@@ -1434,22 +1437,38 @@ impl eframe::App for NephronApp {
                                     ChatRole::System => ("System", Color32::from_rgb(148, 163, 184)),
                                 };
                                 ui.colored_label(col, egui::RichText::new(who).strong().size(11.0));
-                                let lbl = ui.add(egui::Label::new(egui::RichText::new(&m.content).size(12.0)).sense(egui::Sense::click()));
-                                lbl.context_menu(|ui| {
-                                    if ui.button("Copy").clicked() {
-                                        ctx_action = Some((0, m.content.clone()));
-                                        ui.close_menu();
+                                let parsed_ui = if m.role == ChatRole::Assistant && !self.streaming {
+                                    crate::a2ui::A2uiSurface::parse_from_text(&m.content)
+                                        .or_else(|| crate::a2ui::A2uiSurface::from_markdown_heuristic(&m.content))
+                                } else {
+                                    None
+                                };
+                                if let Some(mut surface) = parsed_ui {
+                                    if let Some(act) = crate::a2ui::draw_a2ui_surface(ui, 316.0, &mut surface) {
+                                        match act.kind.as_deref() {
+                                            Some("cad") => ctx_action = Some((2, act.prompt.unwrap_or_else(|| m.content.clone()))),
+                                            Some("pin") => ctx_action = Some((1, m.content.clone())),
+                                            _ => a2ui_prompt = act.prompt,
+                                        }
                                     }
-                                    if ui.button("Pin to Brain").clicked() {
-                                        ctx_action = Some((1, m.content.clone()));
-                                        ui.close_menu();
-                                    }
-                                    if ui.button("Send to CAD").clicked() {
-                                        ctx_action = Some((2, m.content.clone()));
-                                        ui.close_menu();
-                                    }
-                                });
-                                ui.add_space(4.0);
+                                } else {
+                                    let lbl = ui.add(egui::Label::new(egui::RichText::new(&m.content).size(12.0)).wrap().sense(egui::Sense::click()));
+                                    lbl.context_menu(|ui| {
+                                        if ui.button("Copy").clicked() {
+                                            ctx_action = Some((0, m.content.clone()));
+                                            ui.close_menu();
+                                        }
+                                        if ui.button("Pin to Brain").clicked() {
+                                            ctx_action = Some((1, m.content.clone()));
+                                            ui.close_menu();
+                                        }
+                                        if ui.button("Send to CAD").clicked() {
+                                            ctx_action = Some((2, m.content.clone()));
+                                            ui.close_menu();
+                                        }
+                                    });
+                                }
+                                ui.add_space(6.0);
                             }
                             if !self.web_sources.is_empty() {
                                 ui.separator();
@@ -1513,13 +1532,38 @@ impl eframe::App for NephronApp {
                                 }
                             }
                         }
-                        ui.horizontal(|ui| {
-                            let resp = ui.add_sized([255.0, 26.0], egui::TextEdit::singleline(&mut self.input).hint_text("Ask, search, or build CAD..."));
-                            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            if (ui.add_enabled(!self.streaming, egui::Button::new("→")).clicked() || enter) && !self.streaming {
-                                self.send_prompt();
-                            }
-                        });
+                        if let Some(p) = a2ui_prompt {
+                            self.dispatch_prompt(p);
+                        }
+                        Frame::NONE
+                            .fill(Color32::from_rgba_unmultiplied(255, 255, 255, 10))
+                            .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 28)))
+                            .corner_radius(99.0)
+                            .inner_margin(egui::Margin::symmetric(12, 4))
+                            .show(ui, |ui| {
+                                ui.set_min_size(egui::vec2(316.0, 28.0));
+                                ui.set_max_size(egui::vec2(316.0, 28.0));
+                                ui.horizontal(|ui| {
+                                    let resp = ui.add_sized(
+                                        [274.0, 24.0],
+                                        egui::TextEdit::singleline(&mut self.input)
+                                            .frame(false)
+                                            .hint_text("Ask, search, or build CAD..."),
+                                    );
+                                    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                    let send = crate::icons::vector_icon_button(
+                                        ui,
+                                        "bubble_send",
+                                        egui::vec2(26.0, 26.0),
+                                        IconKind::SendRight,
+                                        Color32::from_rgb(186, 230, 253),
+                                        "Send",
+                                    );
+                                    if !self.streaming && (send || enter) && !self.input.trim().is_empty() {
+                                        self.send_prompt();
+                                    }
+                                });
+                            });
                     });
                 });
         }

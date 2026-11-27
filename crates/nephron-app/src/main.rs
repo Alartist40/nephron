@@ -1,5 +1,6 @@
 //! Nephron — Local-first Rust GUI workspace on top of Cynapse & Dendrite.
 
+mod a2ui;
 mod app;
 mod brain;
 mod doctor;

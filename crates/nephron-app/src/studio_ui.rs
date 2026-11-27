@@ -1,5 +1,6 @@
 //! Rendering and async synthesis wiring for the Interface Studio Modal.
 
+use crate::a2ui::{draw_a2ui_surface, A2uiAction};
 use crate::app::NephronApp;
 use crate::icons::{paint_icon, vector_icon_button, IconKind};
 use crate::studio::{
@@ -330,12 +331,13 @@ impl NephronApp {
     }
 
     fn draw_learn_sources(&mut self, ui: &mut egui::Ui, col_w: f32, col_h: f32) {
-        let inner_w = (col_w - 24.0).max(160.0);
-        let inner_h = (col_h - 24.0).max(180.0);
+        let inner_w = (col_w - 32.0).max(160.0);
+        let inner_h = (col_h - 32.0).max(180.0);
         Frame::NONE
             .fill(Color32::from_rgba_unmultiplied(255, 255, 255, 5))
             .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 16)))
-            .inner_margin(12.0)
+            .corner_radius(egui::CornerRadius { nw: 0, ne: 0, sw: 24, se: 0 })
+            .inner_margin(16.0)
             .show(ui, |ui| {
                 ui.allocate_ui_with_layout(
                     egui::vec2(inner_w, inner_h),
@@ -351,7 +353,7 @@ impl NephronApp {
                                 techart_tag(ui, &format!("{active_count} active"), Color32::from_rgb(125, 211, 252));
                             });
                         });
-                        ui.add_space(6.0);
+                        ui.add_space(10.0);
 
                         ui.horizontal(|ui| {
                             let half = (inner_w - 8.0) * 0.5;
@@ -409,28 +411,39 @@ impl NephronApp {
                             });
                         }
 
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            let r = ui.add_sized(
-                                [inner_w - 34.0, 24.0],
-                                egui::TextEdit::singleline(&mut self.studio.web_input).hint_text("Discover web sources..."),
-                            );
-                            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            let send = vector_icon_button(ui, "vault_web_go", egui::vec2(26.0, 26.0), IconKind::SendRight, Color32::from_rgb(186, 230, 253), "Search web sources");
-                            if (send || enter) && !self.studio.web_input.trim().is_empty() {
-                                let q = self.studio.web_input.trim().to_string();
-                                self.studio.web_input.clear();
-                                let searcher = self.searcher.clone();
-                                let (tx, rx) = mpsc::unbounded_channel();
-                                self.studio_web_rx = Some(rx);
-                                self.rt.spawn(async move {
-                                    let hits = searcher.search(&q, 4).await.unwrap_or_default();
-                                    let _ = tx.send((q, hits));
+                        ui.add_space(10.0);
+                        Frame::NONE
+                            .fill(Color32::from_rgba_unmultiplied(255, 255, 255, 10))
+                            .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 26)))
+                            .corner_radius(16.0)
+                            .inner_margin(egui::Margin::symmetric(10, 4))
+                            .show(ui, |ui| {
+                                ui.set_min_size(egui::vec2(inner_w - 22.0, 28.0));
+                                ui.set_max_size(egui::vec2(inner_w - 22.0, 28.0));
+                                ui.horizontal(|ui| {
+                                    let r = ui.add_sized(
+                                        [(inner_w - 58.0).max(60.0), 24.0],
+                                        egui::TextEdit::singleline(&mut self.studio.web_input)
+                                            .frame(false)
+                                            .hint_text("Discover web sources..."),
+                                    );
+                                    let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                    let send = vector_icon_button(ui, "vault_web_go", egui::vec2(26.0, 26.0), IconKind::SendRight, Color32::from_rgb(186, 230, 253), "Search web sources");
+                                    if (send || enter) && !self.studio.web_input.trim().is_empty() {
+                                        let q = self.studio.web_input.trim().to_string();
+                                        self.studio.web_input.clear();
+                                        let searcher = self.searcher.clone();
+                                        let (tx, rx) = mpsc::unbounded_channel();
+                                        self.studio_web_rx = Some(rx);
+                                        self.rt.spawn(async move {
+                                            let hits = searcher.search(&q, 4).await.unwrap_or_default();
+                                            let _ = tx.send((q, hits));
+                                        });
+                                    }
                                 });
-                            }
-                        });
+                            });
 
-                        ui.add_space(8.0);
+                        ui.add_space(12.0);
                         let mut remove_idx: Option<usize> = None;
                         let mut changed = false;
                         egui::ScrollArea::vertical().id_salt("vault_scroll").show(ui, |ui| {
@@ -560,31 +573,50 @@ impl NephronApp {
                                         });
 
                                         ui.add_space(12.0);
-                                        for m in &self.studio.chat {
-                                            let bg = if m.user {
-                                                Color32::from_rgba_unmultiplied(14, 165, 233, 45)
+                                        let mut a2ui_act: Option<A2uiAction> = None;
+                                        for m in &mut self.studio.chat {
+                                            if let Some(surface) = &mut m.surface {
+                                                if let Some(act) = draw_a2ui_surface(ui, inner_w - 12.0, surface) {
+                                                    a2ui_act = Some(act);
+                                                }
                                             } else {
-                                                Color32::from_rgba_unmultiplied(255, 255, 255, 12)
-                                            };
-                                            Frame::NONE
-                                                .fill(bg)
-                                                .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 22)))
-                                                .corner_radius(14.0)
-                                                .inner_margin(10.0)
-                                                .show(ui, |ui| {
-                                                    ui.vertical(|ui| {
-                                                        ui.set_width(inner_w - 32.0);
-                                                        ui.add(egui::Label::new(egui::RichText::new(&m.text).size(12.0).color(Color32::from_rgb(241, 245, 249))).wrap());
-                                                        if !m.citations.is_empty() {
-                                                            ui.add_space(4.0);
-                                                            ui.small(
-                                                                egui::RichText::new(format!("Sources: {}", m.citations.join(" · ")))
-                                                                    .color(Color32::from_rgb(125, 211, 252)),
-                                                            );
-                                                        }
+                                                let bg = if m.user {
+                                                    Color32::from_rgba_unmultiplied(14, 165, 233, 45)
+                                                } else {
+                                                    Color32::from_rgba_unmultiplied(255, 255, 255, 12)
+                                                };
+                                                Frame::NONE
+                                                    .fill(bg)
+                                                    .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 22)))
+                                                    .corner_radius(14.0)
+                                                    .inner_margin(10.0)
+                                                    .show(ui, |ui| {
+                                                        ui.vertical(|ui| {
+                                                            ui.set_width(inner_w - 32.0);
+                                                            ui.add(egui::Label::new(egui::RichText::new(&m.text).size(12.0).color(Color32::from_rgb(241, 245, 249))).wrap());
+                                                            if !m.citations.is_empty() {
+                                                                ui.add_space(4.0);
+                                                                ui.small(
+                                                                    egui::RichText::new(format!("Sources: {}", m.citations.join(" · ")))
+                                                                        .color(Color32::from_rgb(125, 211, 252)),
+                                                                );
+                                                            }
+                                                        });
                                                     });
-                                                });
-                                            ui.add_space(6.0);
+                                            }
+                                            ui.add_space(8.0);
+                                        }
+                                        if let Some(act) = a2ui_act {
+                                            match act.kind.as_deref() {
+                                                Some("stage:flashcards") => self.studio.stage = ArtifactStage::Flashcards,
+                                                Some("stage:quiz") => self.studio.stage = ArtifactStage::Quiz,
+                                                Some("stage:mindmap") => self.studio.stage = ArtifactStage::MindMap,
+                                                _ => {
+                                                    if let Some(p) = act.prompt {
+                                                        starter_prompt = Some(p);
+                                                    }
+                                                }
+                                            }
                                         }
                                         if self.studio.generating {
                                             ui.small(egui::RichText::new("Synthesizing across active sources...").monospace().color(Color32::from_rgb(125, 211, 252)));
@@ -599,17 +631,28 @@ impl NephronApp {
                             .fill(Color32::from_rgba_unmultiplied(255, 255, 255, 12))
                             .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 32)))
                             .corner_radius(99.0)
-                            .inner_margin(egui::Margin::symmetric(12, 6))
+                            .inner_margin(egui::Margin::symmetric(14, 5))
                             .show(ui, |ui| {
-                                ui.set_width(inner_w - 24.0);
+                                ui.set_min_size(egui::vec2(inner_w - 28.0, 30.0));
+                                ui.set_max_size(egui::vec2(inner_w - 28.0, 30.0));
                                 ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 6.0;
                                     let r = ui.add_sized(
-                                        [(inner_w - 115.0).max(100.0), 26.0],
+                                        [(inner_w - 118.0).max(80.0), 26.0],
                                         egui::TextEdit::singleline(&mut self.studio.chat_input)
+                                            .frame(false)
                                             .hint_text("Ask or synthesize across sources..."),
                                     );
                                     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                                    ui.small(egui::RichText::new(format!("{} src", self.studio.active_sources().len())).monospace().color(Color32::from_rgb(148, 163, 184)));
+                                    ui.add_sized(
+                                        [42.0, 20.0],
+                                        egui::Label::new(
+                                            egui::RichText::new(format!("{} src", self.studio.active_sources().len()))
+                                                .monospace()
+                                                .size(10.5)
+                                                .color(Color32::from_rgb(148, 163, 184)),
+                                        ),
+                                    );
                                     let send = vector_icon_button(
                                         ui,
                                         "studio_send_up",
@@ -630,6 +673,7 @@ impl NephronApp {
                                 user: true,
                                 text: p.clone(),
                                 citations: Vec::new(),
+                                surface: None,
                             });
                             self.rpg.award_xp(15, 4, "+15 XP · Synthesis");
                             self.trigger_studio_synthesis(p);
@@ -641,12 +685,13 @@ impl NephronApp {
     }
 
     fn draw_learn_deck(&mut self, ui: &mut egui::Ui, col_w: f32, col_h: f32) {
-        let inner_w = (col_w - 24.0).max(200.0);
-        let inner_h = (col_h - 24.0).max(200.0);
+        let inner_w = (col_w - 32.0).max(200.0);
+        let inner_h = (col_h - 32.0).max(200.0);
         Frame::NONE
             .fill(Color32::from_rgba_unmultiplied(255, 255, 255, 5))
             .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 16)))
-            .inner_margin(12.0)
+            .corner_radius(egui::CornerRadius { nw: 0, ne: 0, sw: 0, se: 24 })
+            .inner_margin(16.0)
             .show(ui, |ui| {
                 ui.allocate_ui_with_layout(
                     egui::vec2(inner_w, inner_h),
