@@ -1,0 +1,2874 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEPHRON</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Three.js (r128) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+
+    <style>
+        html, body {
+            background-color: #030407;
+            color: #f8fafc;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            user-select: none;
+            -webkit-user-select: none;
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .selectable-text {
+            user-select: text;
+            -webkit-user-select: text;
+        }
+
+        #neural-canvas-container {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 0;
+            cursor: grab;
+        }
+
+        #neural-canvas-container:active {
+            cursor: grabbing;
+        }
+
+        .radial-vignette {
+            background: radial-gradient(circle at 50% 50%, transparent 48%, rgba(3, 4, 7, 0.82) 100%);
+            pointer-events: none;
+        }
+
+        /* Techartist-inspired Kinetic Glass Pill & Spring Physics */
+        .kinetic-dock {
+            background: rgba(11, 15, 25, 0.68);
+            backdrop-filter: blur(26px) saturate(160%);
+            -webkit-backdrop-filter: blur(26px) saturate(160%);
+            border: 1px solid rgba(255, 255, 255, 0.11);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        .glass-surface {
+            background: rgba(10, 14, 24, 0.78);
+            backdrop-filter: blur(28px) saturate(160%);
+            -webkit-backdrop-filter: blur(28px) saturate(160%);
+            border: 1px solid rgba(255, 255, 255, 0.11);
+            box-shadow: 0 28px 64px -12px rgba(0, 0, 0, 0.92), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        }
+
+        /* Sliding magnetic pill indicator inside navbar */
+        #nav-active-pill {
+            transition: transform 0.42s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.42s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease;
+        }
+
+        /* Playful spring icon hover */
+        .nav-icon-btn {
+            transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.2s ease;
+        }
+        .nav-icon-btn:hover {
+            transform: translateY(-4px) scale(1.12);
+        }
+        .nav-icon-btn:active {
+            transform: scale(0.92);
+        }
+
+        /* Bubble Head Companion Organic Float & Morph */
+        @keyframes bubbleFloat {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            33% { transform: translateY(-6px) rotate(-1.5deg); }
+            66% { transform: translateY(-3px) rotate(1.5deg); }
+        }
+        @keyframes eyeBlink {
+            0%, 92%, 100% { transform: scaleY(1); }
+            96% { transform: scaleY(0.08); }
+        }
+        @keyframes micRipple {
+            0% { transform: scale(1); opacity: 0.75; }
+            100% { transform: scale(1.85); opacity: 0; }
+        }
+        @keyframes soundWave {
+            0%, 100% { transform: scaleY(0.3); }
+            50% { transform: scaleY(1); }
+        }
+
+        .bubble-head-orb {
+            animation: bubbleFloat 5.5s ease-in-out infinite;
+            background: radial-gradient(circle at 32% 28%, rgba(56, 189, 248, 0.35), rgba(15, 23, 42, 0.85) 68%, rgba(129, 140, 248, 0.28));
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), inset 0 2px 10px rgba(255, 255, 255, 0.22), 0 0 24px rgba(56, 189, 248, 0.2);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+        }
+        .bubble-head-orb:hover {
+            transform: scale(1.08) translateY(-3px);
+            box-shadow: 0 20px 48px rgba(0, 0, 0, 0.85), inset 0 2px 14px rgba(255, 255, 255, 0.3), 0 0 34px rgba(56, 189, 248, 0.42);
+        }
+        .bubble-head-orb.listening {
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.85), inset 0 2px 14px rgba(244, 63, 94, 0.45), 0 0 38px rgba(244, 63, 94, 0.5);
+            border-color: rgba(251, 113, 133, 0.55);
+        }
+
+        .bubble-eye {
+            animation: eyeBlink 4.8s infinite;
+            transform-origin: center;
+        }
+
+        .mic-ring {
+            animation: micRipple 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+        }
+
+        .wave-bar {
+            animation: soundWave 0.75s ease-in-out infinite;
+            transform-origin: center;
+        }
+
+        /* 3D Flashcard Flip */
+        .flashcard-scene {
+            perspective: 1000px;
+        }
+        .flashcard-inner {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            transition: transform 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transform-style: preserve-3d;
+        }
+        .flashcard-inner.is-flipped {
+            transform: rotateY(180deg);
+        }
+        .flashcard-face {
+            position: absolute;
+            inset: 0;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+        }
+        .flashcard-back {
+            transform: rotateY(180deg);
+        }
+
+        /* Sleek scrollbar */
+        .thin-scroll::-webkit-scrollbar { width: 3px; }
+        .thin-scroll::-webkit-scrollbar-track { background: transparent; }
+        .thin-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.16); border-radius: 999px; }
+
+        /* Techartist Education-Inspired Bento Cards & Kinetic Transitions */
+        .techart-bento-card {
+            background: linear-gradient(155deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.015) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            border-radius: 22px;
+            transition: transform 0.36s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.25s ease, background 0.25s ease, box-shadow 0.3s ease;
+        }
+        .techart-bento-card:hover {
+            transform: translateY(-3px);
+            border-color: rgba(255, 255, 255, 0.22);
+            background: linear-gradient(155deg, rgba(255, 255, 255, 0.085) 0%, rgba(255, 255, 255, 0.025) 100%);
+            box-shadow: 0 14px 32px -8px rgba(0, 0, 0, 0.65);
+        }
+        .techart-bento-card:active {
+            transform: scale(0.97);
+        }
+
+        .techart-tag {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            padding: 2px 7px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        /* Minimal Range Slider */
+        input[type="range"] {
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.12);
+            height: 3px;
+            border-radius: 999px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #38bdf8;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.8);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Pure 3D MindCorpus Brain Canvas -->
+    <div id="neural-canvas-container"></div>
+    <div class="fixed inset-0 radial-vignette z-[1]"></div>
+
+    <!-- Whisper-Quiet Top Left Backend Dot (No bulky text) -->
+    <div class="fixed top-5 left-5 z-30 flex items-center gap-2">
+        <button id="backend-toggle-dot" title="Switch Cynapse / Ollama" class="kinetic-dock px-3 py-1.5 rounded-full flex items-center gap-2 hover:scale-105 transition-transform">
+            <span id="backend-dot" class="w-2 h-2 rounded-full bg-sky-400 shadow-[0_0_10px_#38bdf8]"></span>
+            <span id="backend-short-label" class="text-[11px] font-mono tracking-wider text-slate-300">cynapse</span>
+        </button>
+    </div>
+
+    <!-- Subtle Floating Memory Whisper Card (Appears only when clicking a subtle memory star inside the brain) -->
+    <div id="dendrite-whisper-card" class="hidden fixed top-16 left-5 z-30 w-64 glass-surface rounded-2xl p-3.5 transition-all">
+        <div class="flex items-center justify-between mb-1.5">
+            <span id="dendrite-lobe-tag" class="text-[10px] font-mono text-amber-300/90">● memory</span>
+            <div class="flex items-center gap-1.5">
+                <button id="dendrite-study-jump" title="Study this node" class="text-[10px] font-mono text-sky-300 hover:underline px-1">study</button>
+                <button id="dendrite-pin-btn" title="Pin" class="text-xs text-amber-300 hover:scale-110 transition-transform">★</button>
+                <button id="dendrite-close-btn" class="text-slate-400 hover:text-white text-xs px-1">✕</button>
+            </div>
+        </div>
+        <div id="dendrite-title" class="text-xs font-medium text-white mb-1"></div>
+        <div id="dendrite-body" class="text-[11px] text-slate-400 leading-relaxed selectable-text"></div>
+    </div>
+
+    <!-- Floating Desktop Companion Pet (Appears when spawned from Pets dock button) -->
+    <div id="floating-pet-orb" class="hidden fixed top-20 right-6 z-30 glass-surface rounded-full px-3.5 py-2 flex items-center gap-2.5 cursor-move">
+        <span id="pet-emoji" class="text-lg">🐱</span>
+        <span id="pet-thought" class="text-[11px] font-mono text-slate-300 max-w-[140px] truncate">idle</span>
+        <button id="pet-dismiss" class="text-slate-500 hover:text-white text-xs ml-1">✕</button>
+    </div>
+
+    <!-- CUA Swarm Cursors Layer -->
+    <div id="swarm-layer" class="fixed inset-0 pointer-events-none z-20 overflow-hidden"></div>
+
+    <!-- Full-Viewport Autolayout Studio Workspace (Techartist Bento + Responsive Columns) -->
+    <div id="studio-interface-modal" class="hidden fixed inset-0 z-40 flex items-center justify-center p-2.5 sm:p-5 pb-24 sm:pb-24 bg-black/60 backdrop-blur-md transition-opacity">
+        <div class="w-full max-w-[1380px] h-full glass-surface rounded-[28px] sm:rounded-[32px] flex flex-col overflow-hidden border border-white/15">
+            
+            <!-- Studio Top Strip: Adaptive Mode Switcher + Compact Sub-View Pills -->
+            <div class="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-3 border-b border-white/10 bg-black/25 shrink-0">
+                <div class="flex items-center gap-1.5 bg-white/[0.04] p-1 rounded-full border border-white/10">
+                    <button data-studio-pane="pane-learn" class="studio-pane-btn px-3.5 sm:px-4 py-1.5 rounded-full text-xs font-medium bg-sky-500/25 text-sky-200 border border-sky-400/30 transition-all">
+                        Cortex Studio
+                    </button>
+                    <button data-studio-pane="pane-habits" class="studio-pane-btn px-3.5 sm:px-4 py-1.5 rounded-full text-xs font-medium text-slate-400 hover:text-white transition-all">
+                        Habits RPG
+                    </button>
+                    <button data-studio-pane="pane-engine" class="studio-pane-btn px-3.5 sm:px-4 py-1.5 rounded-full text-xs font-medium text-slate-400 hover:text-white transition-all">
+                        Engine &amp; TTS
+                    </button>
+                </div>
+
+                <!-- Compact Autolayout Segmented Bar (Only visible on < lg screens so columns never squash!) -->
+                <div id="compact-column-switcher" class="flex lg:hidden items-center gap-1 bg-white/[0.04] p-1 rounded-full border border-white/10">
+                    <button data-col="sources" class="compact-col-btn px-3 py-1 rounded-full text-[11px] font-mono text-slate-400 hover:text-white transition-all">Sources</button>
+                    <button data-col="synthesis" class="compact-col-btn px-3 py-1 rounded-full text-[11px] font-mono bg-white/15 text-white transition-all">Synthesis</button>
+                    <button data-col="artifacts" class="compact-col-btn px-3 py-1 rounded-full text-[11px] font-mono text-slate-400 hover:text-white transition-all">Deck</button>
+                </div>
+
+                <div class="flex items-center gap-2.5 ml-auto lg:ml-0">
+                    <span id="studio-db-count" class="hidden sm:inline techart-tag text-amber-300/90">5 nodes</span>
+                    <button id="close-studio-btn" class="w-8 h-8 rounded-full bg-white/5 hover:bg-white/15 flex items-center justify-center text-slate-300 hover:text-white transition-colors">
+                        ✕
+                    </button>
+                </div>
+            </div>
+
+            <!-- PANE 1: Techartist-Inspired Bento & Orbital Study Studio (True Autolayout) -->
+            <div id="pane-learn" class="studio-pane flex-1 min-h-0 overflow-hidden grid grid-cols-1 lg:grid-cols-12">
+                
+                <!-- COLUMN 1: KNOWLEDGE VAULT (Sources & Ingestion) -->
+                <div id="col-sources" class="studio-col hidden lg:flex lg:col-span-3 min-h-0 border-b lg:border-b-0 lg:border-r border-white/10 p-4 flex-col gap-3 overflow-y-auto thin-scroll bg-white/[0.015]">
+                    <div class="flex items-center justify-between px-1">
+                        <span class="text-xs font-medium tracking-wide text-slate-200">01 · Knowledge Vault</span>
+                        <span id="active-sources-count" class="techart-tag text-sky-300">2 active</span>
+                    </div>
+
+                    <!-- Drop PDF & Quick Note Bento Pills -->
+                    <div class="grid grid-cols-2 gap-2">
+                        <label id="pdf-drop-zone" class="techart-bento-card py-2.5 px-3 text-[11px] text-slate-200 flex items-center justify-center gap-1.5 cursor-pointer">
+                            <input id="pdf-file-input" type="file" accept=".pdf,.txt,.md,.csv,.json" class="hidden">
+                            <span class="text-sky-300">+</span>
+                            <span>Drop PDF</span>
+                        </label>
+                        <button id="quick-note-btn" class="techart-bento-card py-2.5 px-3 text-[11px] text-slate-200 flex items-center justify-center gap-1.5">
+                            <span class="text-amber-300">✎</span>
+                            <span>Add Note</span>
+                        </button>
+                    </div>
+
+                    <!-- Web Discovery Pill -->
+                    <form id="source-web-search-form" class="bg-white/[0.04] border border-white/10 rounded-2xl p-2.5 flex items-center gap-2">
+                        <input id="source-web-input" type="text" placeholder="Discover web sources..." class="flex-1 min-w-0 bg-transparent text-[11px] text-white placeholder-slate-500 focus:outline-none px-1">
+                        <button type="submit" class="w-7 h-7 rounded-full bg-white/10 hover:bg-sky-500/30 text-xs text-slate-200 flex items-center justify-center shrink-0 transition-colors">→</button>
+                    </form>
+
+                    <!-- Vault Items List -->
+                    <div id="notebook-sources-list" class="flex-1 min-h-0 space-y-2 overflow-y-auto thin-scroll pr-0.5"></div>
+                </div>
+
+                <!-- COLUMN 2: CENTER SYNTHESIS STREAM -->
+                <div id="col-synthesis" class="studio-col flex lg:col-span-5 min-h-0 p-4 sm:p-6 flex-col justify-between overflow-hidden bg-black/15">
+                    <div id="notebook-center-scroll" class="flex-1 min-h-0 overflow-y-auto thin-scroll pr-1 space-y-4">
+                        
+                        <!-- Techartist Editorial Hero Block -->
+                        <div id="notebook-hero" class="space-y-3">
+                            <div class="flex items-center gap-2">
+                                <span class="techart-tag text-emerald-300">SYNTHESIS ENGINE</span>
+                                <span class="techart-tag text-slate-400">3D CORTEX SYNC</span>
+                            </div>
+                            <h2 id="notebook-main-title" class="text-xl sm:text-2xl font-normal tracking-tight text-white">MindCorpus Cognitive Canvas</h2>
+                            <p id="notebook-main-summary" class="text-xs text-slate-400 leading-relaxed selectable-text">
+                                Distill PDFs, research notes, and web discoveries into living cortical memory stars—or launch an interactive study deck on the right.
+                            </p>
+
+                            <!-- Techartist-Inspired Bento Prompt Cards -->
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                                <button data-starter="Break down the core concepts and first principles from my active sources" class="notebook-starter-btn techart-bento-card text-left p-3.5 flex flex-col justify-between gap-3">
+                                    <div class="flex items-center justify-between">
+                                        <span class="techart-tag text-sky-300">01</span>
+                                        <span class="text-xs text-slate-400">↗</span>
+                                    </div>
+                                    <span class="text-[11px] font-medium text-slate-200 leading-snug">First-Principles Breakdown</span>
+                                </button>
+                                <button data-starter="Construct a structured study curriculum with key mental models and blind spots" class="notebook-starter-btn techart-bento-card text-left p-3.5 flex flex-col justify-between gap-3">
+                                    <div class="flex items-center justify-between">
+                                        <span class="techart-tag text-amber-300">02</span>
+                                        <span class="text-xs text-slate-400">↗</span>
+                                    </div>
+                                    <span class="text-[11px] font-medium text-slate-200 leading-snug">Curriculum &amp; Blind Spots</span>
+                                </button>
+                                <button data-starter="Challenge me with Socratic questions on the hardest ideas in my sources" class="notebook-starter-btn techart-bento-card text-left p-3.5 flex flex-col justify-between gap-3">
+                                    <div class="flex items-center justify-between">
+                                        <span class="techart-tag text-emerald-300">03</span>
+                                        <span class="text-xs text-slate-400">↗</span>
+                                    </div>
+                                    <span class="text-[11px] font-medium text-slate-200 leading-snug">Socratic Mastery Check</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Dynamic Grounded Chat Thread -->
+                        <div id="notebook-chat-feed" class="space-y-3 pb-2"></div>
+                    </div>
+
+                    <!-- Bottom Grounded Prompt Bar -->
+                    <form id="notebook-chat-form" class="mt-3 shrink-0 flex items-center gap-2 bg-white/[0.05] border border-white/15 rounded-full px-4 py-2.5">
+                        <input id="notebook-chat-input" type="text" placeholder="Ask a question or synthesize across sources..." class="flex-1 min-w-0 bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none selectable-text">
+                        <span id="notebook-source-pill" class="techart-tag text-slate-300 shrink-0">2 sources</span>
+                        <button type="submit" class="w-7 h-7 rounded-full bg-sky-500/30 hover:bg-sky-500/50 text-sky-100 flex items-center justify-center shrink-0 transition-colors">↑</button>
+                    </form>
+                </div>
+
+                <!-- COLUMN 3: INTERACTIVE ARTIFACT DECK (Right Panel) -->
+                <div id="col-artifacts" class="studio-col hidden lg:flex lg:col-span-4 min-h-0 border-t lg:border-t-0 lg:border-l border-white/10 p-4 flex-col gap-3 overflow-y-auto thin-scroll bg-white/[0.015]">
+                    <div class="flex items-center justify-between px-1">
+                        <span class="text-xs font-medium tracking-wide text-slate-200">02 · Interactive Deck</span>
+                        <span id="studio-gen-status" class="techart-tag text-slate-300">ready</span>
+                    </div>
+
+                    <!-- Techartist Bento Artifact Tiles (3x2 on wide, 2x3 on narrow) -->
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        <button data-artifact="audio" class="studio-tile-btn techart-bento-card p-3 text-left flex flex-col justify-between gap-2">
+                            <div class="flex items-center justify-between">
+                                <span class="text-sky-300 text-sm">🎧</span>
+                                <span class="techart-tag text-sky-300/80">TTS</span>
+                            </div>
+                            <span class="text-[11px] font-medium text-slate-200">Audio Dialogue</span>
+                        </button>
+                        <button data-artifact="flashcards" class="studio-tile-btn techart-bento-card p-3 text-left flex flex-col justify-between gap-2">
+                            <div class="flex items-center justify-between">
+                                <span class="text-amber-300 text-sm">🗂</span>
+                                <span class="techart-tag text-amber-300/80">3D</span>
+                            </div>
+                            <span class="text-[11px] font-medium text-slate-200">Flashcards</span>
+                        </button>
+                        <button data-artifact="quiz" class="studio-tile-btn techart-bento-card p-3 text-left flex flex-col justify-between gap-2">
+                            <div class="flex items-center justify-between">
+                                <span class="text-cyan-300 text-sm">?</span>
+                                <span class="techart-tag text-cyan-300/80">+XP</span>
+                            </div>
+                            <span class="text-[11px] font-medium text-slate-200">Active Quiz</span>
+                        </button>
+                        <button data-artifact="mindmap" class="studio-tile-btn techart-bento-card p-3 text-left flex flex-col justify-between gap-2">
+                            <div class="flex items-center justify-between">
+                                <span class="text-emerald-300 text-sm">☍</span>
+                                <span class="techart-tag text-emerald-300/80">MAP</span>
+                            </div>
+                            <span class="text-[11px] font-medium text-slate-200">Concept Tree</span>
+                        </button>
+                        <button data-artifact="slides" class="studio-tile-btn techart-bento-card p-3 text-left flex flex-col justify-between gap-2">
+                            <div class="flex items-center justify-between">
+                                <span class="text-purple-300 text-sm">▤</span>
+                                <span class="techart-tag text-purple-300/80">DECK</span>
+                            </div>
+                            <span class="text-[11px] font-medium text-slate-200">Visual Slides</span>
+                        </button>
+                        <button data-artifact="report" class="studio-tile-btn techart-bento-card p-3 text-left flex flex-col justify-between gap-2">
+                            <div class="flex items-center justify-between">
+                                <span class="text-rose-300 text-sm">✦</span>
+                                <span class="techart-tag text-rose-300/80">DOC</span>
+                            </div>
+                            <span class="text-[11px] font-medium text-slate-200">Field Brief</span>
+                        </button>
+                    </div>
+
+                    <!-- Interactive Studio Stage -->
+                    <div id="studio-stage-box" class="flex-1 min-h-[230px] rounded-[22px] bg-black/35 border border-white/10 p-4 flex flex-col justify-between">
+                        
+                        <!-- Default Stage Placeholder -->
+                        <div id="stage-empty" class="flex-1 flex flex-col items-center justify-center text-center p-3 gap-2">
+                            <span class="text-xl text-slate-500">✦</span>
+                            <div class="text-xs font-medium text-slate-300">Select an artifact card above</div>
+                            <div class="text-[11px] text-slate-500 leading-relaxed max-w-[240px]">Generate interactive flashcards, XP quizzes, a two-host audio dialogue, or a concept tree.</div>
+                        </div>
+
+                        <!-- Flashcards Stage -->
+                        <div id="stage-flashcards" class="hidden flex-1 flex flex-col justify-between gap-3">
+                            <div class="flashcard-scene flex-1 min-h-[175px] cursor-pointer" id="flashcard-container">
+                                <div id="flashcard-inner" class="flashcard-inner">
+                                    <div class="flashcard-face rounded-[20px] bg-gradient-to-br from-amber-500/15 to-sky-500/10 border border-white/15 p-5 flex flex-col items-center justify-center text-center">
+                                        <span class="techart-tag text-amber-300 mb-2">PROMPT · TAP TO FLIP</span>
+                                        <div id="fc-front-text" class="text-xs sm:text-sm font-medium text-white leading-relaxed"></div>
+                                    </div>
+                                    <div class="flashcard-face flashcard-back rounded-[20px] bg-gradient-to-br from-emerald-500/15 to-teal-500/10 border border-emerald-400/25 p-5 flex flex-col items-center justify-center text-center">
+                                        <span class="techart-tag text-emerald-300 mb-2">INSIGHT</span>
+                                        <div id="fc-back-text" class="text-xs text-slate-100 leading-relaxed"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <button id="fc-prev-btn" class="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 text-xs text-slate-300">←</button>
+                                <span id="fc-counter" class="text-[11px] font-mono text-slate-400">1 / 3</span>
+                                <button id="fc-next-btn" class="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 text-xs text-slate-300">→</button>
+                            </div>
+                        </div>
+
+                        <!-- Active Recall Quiz Stage -->
+                        <div id="stage-quiz" class="hidden flex-1 flex flex-col justify-between gap-2.5 overflow-y-auto thin-scroll">
+                            <div class="space-y-2.5">
+                                <div class="flex items-center justify-between">
+                                    <span id="quiz-progress-label" class="techart-tag text-cyan-300">1 / 3</span>
+                                    <span id="quiz-score-label" class="techart-tag text-emerald-300">score: 0</span>
+                                </div>
+                                <div id="quiz-question-text" class="text-xs font-medium text-white leading-snug"></div>
+                                <div id="quiz-options-list" class="space-y-1.5"></div>
+                            </div>
+                            <div class="flex items-center justify-between pt-2 border-t border-white/5">
+                                <span id="quiz-feedback-text" class="text-[11px] text-slate-400 truncate max-w-[170px]">Pick an option</span>
+                                <button id="quiz-next-btn" class="px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 text-[11px] text-white">next →</button>
+                            </div>
+                        </div>
+
+                        <!-- Audio Overview (Two-Host Deep Dive Dialogue + TTS) -->
+                        <div id="stage-audio" class="hidden flex-1 flex flex-col justify-between gap-2.5">
+                            <div class="space-y-2 overflow-y-auto thin-scroll max-h-56">
+                                <div class="flex items-center justify-between">
+                                    <span class="techart-tag text-sky-300">SYNTHETIC DIALOGUE</span>
+                                    <button id="play-audio-overview-btn" class="px-3 py-1 rounded-full bg-sky-500/25 hover:bg-sky-500/40 text-[11px] font-mono text-sky-100 border border-sky-400/35">▶ play</button>
+                                </div>
+                                <div id="audio-script-box" class="text-xs text-slate-300 leading-relaxed space-y-2 selectable-text"></div>
+                            </div>
+                        </div>
+
+                        <!-- Mind Map / Slides / Briefing Doc Stage -->
+                        <div id="stage-doc" class="hidden flex-1 flex flex-col gap-2 overflow-y-auto thin-scroll max-h-60">
+                            <div id="stage-doc-title" class="text-xs font-medium text-emerald-300"></div>
+                            <div id="stage-doc-content" class="space-y-2 text-xs text-slate-300 leading-relaxed selectable-text"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PANE 2: Habitica-Style Immersive RPG Habit Tracker & Focus Quest -->
+            <div id="pane-habits" class="studio-pane hidden flex-1 overflow-y-auto thin-scroll p-4 sm:p-5 flex flex-col gap-4">
+                
+                <!-- Habitica Character HUD Banner -->
+                <div class="rounded-2xl bg-gradient-to-r from-indigo-950/70 via-slate-900/80 to-purple-950/60 border border-white/15 p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div class="flex items-center gap-3.5">
+                        <!-- Pixel-Art / Vector Neural Scholar Avatar -->
+                        <div class="relative w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-400/25 to-purple-500/25 border border-amber-300/30 flex items-center justify-center text-2xl shadow-[0_0_24px_rgba(251,191,36,0.2)]">
+                            🧙‍♂️
+                            <span id="rpg-level-badge" class="absolute -bottom-1.5 -right-1.5 px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-mono font-bold">Lv 7</span>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm font-medium text-white">Neural Scholar</span>
+                                <span class="px-2 py-0.5 rounded-full bg-purple-500/20 border border-purple-400/30 text-[10px] font-mono text-purple-200">Cortex Mage</span>
+                            </div>
+                            <div class="text-[11px] text-slate-400 mt-0.5">Complete habits &amp; study quests to evolve your 3D cortex</div>
+                        </div>
+                    </div>
+
+                    <!-- HP / XP / Mana / Gold Bars -->
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full md:w-auto">
+                        <div class="bg-black/35 border border-white/10 rounded-xl px-3 py-2 min-w-[105px]">
+                            <div class="flex justify-between text-[10px] font-mono text-rose-300 mb-1"><span>HP</span><span id="rpg-hp-text">48/50</span></div>
+                            <div class="w-full h-1.5 rounded-full bg-white/10 overflow-hidden"><div id="rpg-hp-bar" class="h-full bg-rose-400 transition-all duration-300" style="width:96%"></div></div>
+                        </div>
+                        <div class="bg-black/35 border border-white/10 rounded-xl px-3 py-2 min-w-[105px]">
+                            <div class="flex justify-between text-[10px] font-mono text-amber-300 mb-1"><span>XP</span><span id="rpg-xp-text">340/500</span></div>
+                            <div class="w-full h-1.5 rounded-full bg-white/10 overflow-hidden"><div id="rpg-xp-bar" class="h-full bg-amber-400 transition-all duration-300" style="width:68%"></div></div>
+                        </div>
+                        <div class="bg-black/35 border border-white/10 rounded-xl px-3 py-2 min-w-[105px]">
+                            <div class="flex justify-between text-[10px] font-mono text-sky-300 mb-1"><span>MP</span><span id="rpg-mp-text">85/100</span></div>
+                            <div class="w-full h-1.5 rounded-full bg-white/10 overflow-hidden"><div id="rpg-mp-bar" class="h-full bg-sky-400 transition-all duration-300" style="width:85%"></div></div>
+                        </div>
+                        <div class="bg-black/35 border border-white/10 rounded-xl px-3 py-2 flex items-center justify-between">
+                            <span class="text-[10px] font-mono text-yellow-300">GOLD</span>
+                            <span id="rpg-gold-text" class="text-xs font-mono font-medium text-yellow-200">🪙 142</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3-Column Habitica Task Board (Habits +/- | Dailies | To-Dos & Focus Boss Quest) -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1">
+                    
+                    <!-- Column 1: Habits (+ / - Reinforcement) -->
+                    <div class="bg-white/[0.03] border border-white/10 rounded-2xl p-3.5 flex flex-col gap-2.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-medium text-amber-200">Habits (+ / −)</span>
+                            <span class="text-[10px] font-mono text-slate-400">reinforce</span>
+                        </div>
+                        <form id="add-habit-form" class="flex gap-1.5">
+                            <input id="new-habit-input" type="text" placeholder="Add a Habit..." class="flex-1 bg-black/30 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none">
+                            <button type="submit" class="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs">+</button>
+                        </form>
+                        <div id="rpg-habits-list" class="space-y-2 overflow-y-auto thin-scroll flex-1"></div>
+                    </div>
+
+                    <!-- Column 2: Dailies (Streak Rituals) -->
+                    <div class="bg-white/[0.03] border border-white/10 rounded-2xl p-3.5 flex flex-col gap-2.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-medium text-sky-200">Dailies</span>
+                            <span class="text-[10px] font-mono text-slate-400">streaks</span>
+                        </div>
+                        <form id="add-daily-form" class="flex gap-1.5">
+                            <input id="new-daily-input" type="text" placeholder="Add a Daily..." class="flex-1 bg-black/30 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none">
+                            <button type="submit" class="px-2.5 py-1.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 text-xs">+</button>
+                        </form>
+                        <div id="rpg-dailies-list" class="space-y-2 overflow-y-auto thin-scroll flex-1"></div>
+                    </div>
+
+                    <!-- Column 3: To-Dos & Neural Boss Focus Quest -->
+                    <div class="bg-white/[0.03] border border-white/10 rounded-2xl p-3.5 flex flex-col gap-2.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-medium text-emerald-200">To-Dos &amp; Focus Quest</span>
+                            <span id="rpg-toast" class="text-[10px] font-mono text-emerald-300"></span>
+                        </div>
+                        <form id="add-todo-form" class="flex gap-1.5">
+                            <input id="new-todo-input" type="text" placeholder="Add a Quest To-Do..." class="flex-1 bg-black/30 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none">
+                            <button type="submit" class="px-2.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-xs">+</button>
+                        </form>
+                        <div id="rpg-todos-list" class="space-y-2 overflow-y-auto thin-scroll flex-1"></div>
+
+                        <!-- Mini Focus Boss Encounter -->
+                        <div class="mt-auto pt-2.5 border-t border-white/10 flex items-center justify-between bg-purple-500/10 rounded-xl px-3 py-2 border border-purple-400/20">
+                            <div>
+                                <div class="text-[10px] font-mono text-purple-300">FOCUS QUEST (+50 XP)</div>
+                                <div id="focus-timer-display" class="text-base font-mono text-white">25:00</div>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <button id="focus-start-btn" class="px-3 py-1.5 rounded-full text-[11px] font-mono bg-purple-500/30 hover:bg-purple-500/45 text-purple-100 border border-purple-400/35">battle</button>
+                                <button id="focus-reset-btn" class="px-2 py-1.5 rounded-full text-[11px] font-mono bg-white/5 text-slate-400">↺</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PANE 3: Local Models, Backends & TTS Configuration -->
+            <div id="pane-engine" class="studio-pane hidden flex-1 overflow-y-auto thin-scroll p-5 grid grid-cols-1 md:grid-cols-2 gap-5">
+                
+                <!-- Local Inference Engine -->
+                <div class="bg-white/[0.03] border border-white/10 rounded-2xl p-4 space-y-3.5">
+                    <div class="text-xs font-medium text-white">Local Inference &amp; Research Bridge</div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button data-backend="cynapse" class="studio-backend-btn py-2.5 rounded-2xl text-xs font-mono bg-sky-500/20 text-sky-200 border border-sky-400/35">cynapse :38265</button>
+                        <button data-backend="ollama" class="studio-backend-btn py-2.5 rounded-2xl text-xs font-mono bg-white/5 text-slate-400 border border-white/10">ollama :11434</button>
+                    </div>
+                    <div class="space-y-1">
+                        <label class="text-[10px] font-mono text-slate-400">active local model</label>
+                        <select id="studio-model-select" class="w-full bg-white/[0.05] border border-white/10 rounded-2xl px-3.5 py-2.5 text-xs font-mono text-slate-200 focus:outline-none">
+                            <option value="qwen2.5-coder:14b" class="bg-slate-900">qwen2.5-coder:14b</option>
+                            <option value="llama3.3:8b" class="bg-slate-900">llama3.3:8b</option>
+                            <option value="deepseek-r1:7b" class="bg-slate-900">deepseek-r1:7b</option>
+                            <option value="gemma3:12b" class="bg-slate-900">gemma3:12b</option>
+                        </select>
+                    </div>
+                    <div class="space-y-1">
+                        <label class="text-[10px] font-mono text-slate-400">research search provider</label>
+                        <select id="studio-search-select" class="w-full bg-white/[0.05] border border-white/10 rounded-2xl px-3.5 py-2.5 text-xs font-mono text-slate-200 focus:outline-none">
+                            <option value="searxng" class="bg-slate-900">SearXNG Local JSON</option>
+                            <option value="ddg" class="bg-slate-900">DuckDuckGo Fallback</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Voice & TTS Engine -->
+                <div class="bg-white/[0.03] border border-white/10 rounded-2xl p-4 space-y-3.5">
+                    <div class="text-xs font-medium text-white">Offline Voice &amp; TTS Sidecar</div>
+                    <div class="space-y-1">
+                        <label class="text-[10px] font-mono text-slate-400">tts voice persona</label>
+                        <select id="studio-voice-select" class="w-full bg-white/[0.05] border border-white/10 rounded-2xl px-3.5 py-2.5 text-xs font-mono text-slate-200 focus:outline-none">
+                            <option value="Kore" class="bg-slate-900">fantine / Kore (Gentle &amp; Clear)</option>
+                            <option value="Aoede" class="bg-slate-900">Aoede (Breezy)</option>
+                            <option value="Charon" class="bg-slate-900">Charon (Informative)</option>
+                            <option value="Fenrir" class="bg-slate-900">Fenrir (Energetic)</option>
+                        </select>
+                    </div>
+                    <div class="flex items-center justify-between pt-2">
+                        <span class="text-xs text-slate-300">Auto-speak study cards</span>
+                        <input id="auto-tts-toggle" type="checkbox" checked class="accent-sky-400 w-4 h-4 rounded">
+                    </div>
+                    <button id="test-voice-btn" class="w-full py-2.5 rounded-2xl text-xs font-mono bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 transition-all">
+                        test voice synthesis
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Interactive Bubble Head Companion (Bottom-Right Corner — Talk, Tap, or Expand) -->
+    <div class="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3">
+        
+        <!-- Expandable Speech Bubble / Minimal Input Popout -->
+        <div id="bubble-chat-popover" class="hidden w-72 sm:w-80 glass-surface rounded-3xl p-3.5 flex flex-col gap-2.5 transition-all origin-bottom-right">
+            <div id="bubble-transcript" class="max-h-44 overflow-y-auto thin-scroll space-y-2 text-xs text-slate-200 selectable-text">
+                <div class="text-slate-400 text-[11px] leading-relaxed">
+                    Tap the mic to speak, or whisper a prompt below...
+                </div>
+            </div>
+
+            <!-- Minimal Input Pill -->
+            <form id="bubble-form" class="flex items-center gap-1.5 bg-white/[0.04] border border-white/10 rounded-full px-3 py-1.5">
+                <input id="bubble-input" type="text" autocomplete="off" placeholder="Say something..." class="w-full bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none">
+                <button type="submit" class="text-sky-300 hover:text-white p-1 transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+                </button>
+            </form>
+        </div>
+
+        <!-- Living Bubble Head Avatar Button -->
+        <div class="relative flex items-center gap-2.5">
+            <!-- Floating Whisper Thought Pill next to Bubble Head -->
+            <div id="bubble-status-pill" class="glass-surface px-3 py-1 rounded-full text-[11px] font-mono text-slate-300 opacity-0 pointer-events-none transition-opacity duration-300">
+                listening...
+            </div>
+
+            <button id="bubble-head-btn" title="Talk to Nephron" class="bubble-head-orb relative w-14 h-14 rounded-full flex items-center justify-center cursor-pointer focus:outline-none">
+                <!-- Animated SVG Face inside the Bubble Orb -->
+                <svg id="bubble-face-svg" class="w-8 h-8 text-sky-200 transition-transform duration-300" viewBox="0 0 36 36" fill="none">
+                    <!-- Left & Right Blinking Eyes -->
+                    <ellipse class="bubble-eye" cx="12.5" cy="15.5" rx="2" ry="2.6" fill="currentColor"/>
+                    <ellipse class="bubble-eye" cx="23.5" cy="15.5" rx="2" ry="2.6" fill="currentColor"/>
+                    <!-- Expressive Mouth (morphs when speaking/listening) -->
+                    <path id="bubble-mouth" d="M14 22.5Q18 25.5 22 22.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+
+                <!-- Equalizer Bars when Mic is Active -->
+                <div id="bubble-voice-bars" class="hidden flex items-center gap-1 h-5">
+                    <span class="wave-bar w-1 h-3 bg-rose-300 rounded-full" style="animation-delay:0s"></span>
+                    <span class="wave-bar w-1 h-5 bg-rose-300 rounded-full" style="animation-delay:0.15s"></span>
+                    <span class="wave-bar w-1 h-4 bg-rose-300 rounded-full" style="animation-delay:0.3s"></span>
+                    <span class="wave-bar w-1 h-2.5 bg-rose-300 rounded-full" style="animation-delay:0.45s"></span>
+                </div>
+            </button>
+        </div>
+    </div>
+
+    <!-- Floating Subsystem Mini-Drawer (Opens smoothly above the Techartist Kinetic Navbar) -->
+    <div id="kinetic-drawer" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 w-72 glass-surface rounded-3xl p-3.5 transition-all duration-300 opacity-0 pointer-events-none translate-y-3 scale-95">
+        
+        <!-- Drawer 1: AI Bridge & Model -->
+        <div id="tab-bridge" class="drawer-tab hidden space-y-2.5">
+            <div class="grid grid-cols-2 gap-1.5">
+                <button data-backend="cynapse" class="bridge-btn py-2 rounded-2xl text-[11px] font-mono bg-sky-500/20 text-sky-300 border border-sky-400/35">cynapse</button>
+                <button data-backend="ollama" class="bridge-btn py-2 rounded-2xl text-[11px] font-mono bg-white/5 text-slate-400 border border-white/10">ollama</button>
+            </div>
+            <select id="model-select" class="w-full bg-white/[0.04] border border-white/10 rounded-2xl px-3 py-2 text-[11px] font-mono text-slate-200 focus:outline-none">
+                <option value="qwen2.5-coder:14b" class="bg-slate-900">qwen2.5-coder:14b</option>
+                <option value="llama3.3:8b" class="bg-slate-900">llama3.3:8b</option>
+                <option value="deepseek-r1:7b" class="bg-slate-900">deepseek-r1:7b</option>
+            </select>
+        </div>
+
+        <!-- Drawer 2: Dendrite Memory Stars -->
+        <div id="tab-memory" class="drawer-tab hidden space-y-2">
+            <div class="flex items-center justify-between px-1">
+                <span class="text-[10px] font-mono text-amber-300/80">dendrites</span>
+                <button id="prune-memory-btn" class="text-[10px] font-mono text-slate-400 hover:text-rose-300 transition-colors">clear unpinned</button>
+            </div>
+            <div id="memory-pill-list" class="max-h-36 overflow-y-auto thin-scroll space-y-1"></div>
+        </div>
+
+        <!-- Drawer 3: Parametric CAD 3D Preview -->
+        <div id="tab-cad" class="drawer-tab hidden space-y-2.5">
+            <div id="mini-cad-stage" class="w-full h-32 rounded-2xl bg-black/40 border border-white/10 overflow-hidden relative"></div>
+            <div class="grid grid-cols-3 gap-1.5">
+                <button data-prim="box" class="cad-prim-btn py-1.5 rounded-xl text-[10px] font-mono bg-white/5 hover:bg-emerald-500/20 text-slate-300">box</button>
+                <button data-prim="cylinder" class="cad-prim-btn py-1.5 rounded-xl text-[10px] font-mono bg-white/5 hover:bg-emerald-500/20 text-slate-300">cyl</button>
+                <button data-prim="torus" class="cad-prim-btn py-1.5 rounded-xl text-[10px] font-mono bg-white/5 hover:bg-emerald-500/20 text-slate-300">ring</button>
+            </div>
+        </div>
+
+        <!-- Drawer 4: Pets & Swarm -->
+        <div id="tab-agents" class="drawer-tab hidden space-y-2">
+            <div class="grid grid-cols-3 gap-1.5">
+                <button data-emoji="🐱" class="spawn-pet-btn py-2 rounded-2xl bg-white/5 hover:bg-white/10 text-base">🐱</button>
+                <button data-emoji="🐕" class="spawn-pet-btn py-2 rounded-2xl bg-white/5 hover:bg-white/10 text-base">🐕</button>
+                <button data-emoji="🐑" class="spawn-pet-btn py-2 rounded-2xl bg-white/5 hover:bg-white/10 text-base">🐑</button>
+            </div>
+            <button id="swarm-launch-btn" class="w-full py-2 rounded-2xl text-[11px] font-mono bg-purple-500/20 text-purple-200 border border-purple-400/30 hover:bg-purple-500/30 transition-all">
+                swarm cursors
+            </button>
+        </div>
+
+        <!-- Drawer 5: Cortex Visual Tuning -->
+        <div id="tab-cortex" class="drawer-tab hidden space-y-2.5">
+            <div class="flex items-center justify-between gap-1.5">
+                <button id="spin-toggle-btn" class="flex-1 py-1.5 rounded-xl text-[10px] font-mono bg-sky-500/20 text-sky-300 border border-sky-400/30">spin</button>
+                <button id="palette-cycle-btn" class="flex-1 py-1.5 rounded-xl text-[10px] font-mono bg-white/5 text-slate-300 hover:bg-white/10">hue</button>
+                <button id="snap-png-btn" class="flex-1 py-1.5 rounded-xl text-[10px] font-mono bg-white/5 text-slate-300 hover:bg-white/10">png</button>
+            </div>
+            <input id="pulse-range" type="range" min="0.2" max="3.0" step="0.1" value="1.0" class="w-full">
+            <input id="glitter-range" type="range" min="0.4" max="2.0" step="0.1" value="1.0" class="w-full">
+        </div>
+    </div>
+
+    <!-- Techartist-Inspired Kinetic Floating Navbar (Center Bottom — Pure Icons + Sliding Pill + One-Tap Mic) -->
+    <nav id="kinetic-navbar" aria-label="Nephron Dock" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 kinetic-dock rounded-full p-1.5 flex items-center gap-1">
+        <!-- Animated Sliding Magnetic Pill -->
+        <div id="nav-active-pill" class="absolute top-1.5 left-1.5 h-10 w-10 rounded-full bg-white/12 border border-white/15 opacity-0 pointer-events-none"></div>
+
+        <!-- 1. One-Tap Voice Mic Button (Click to speak via ALSA + pocket-tts) -->
+        <button id="dock-mic-btn" title="Voice Mic (Ctrl+M)" class="nav-icon-btn relative z-10 w-10 h-10 rounded-full flex items-center justify-center text-rose-300 hover:text-rose-200">
+            <span id="mic-pulse-ring" class="hidden mic-ring absolute inset-0 rounded-full border border-rose-400"></span>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+            </svg>
+        </button>
+
+        <!-- 2. Interface Studio Icon (PDF Ingestion, DeepTutor Study Mode, Habits & Local Config) -->
+        <button id="dock-interface-btn" title="Interface Studio" class="nav-icon-btn relative z-10 w-10 h-10 rounded-full flex items-center justify-center text-indigo-300 hover:text-white">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm10 0a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zm10-3a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1h-4a1 1 0 01-1-1v-7z"/>
+            </svg>
+        </button>
+
+        <div class="w-[1px] h-5 bg-white/10 mx-0.5"></div>
+
+        <!-- 3. AI Bridge -->
+        <button data-tab="tab-bridge" title="Bridge" class="nav-tab-btn nav-icon-btn relative z-10 w-10 h-10 rounded-full flex items-center justify-center text-sky-300">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+            </svg>
+        </button>
+
+        <!-- 3. Dendrite Memory -->
+        <button data-tab="tab-memory" title="Memory" class="nav-tab-btn nav-icon-btn relative z-10 w-10 h-10 rounded-full flex items-center justify-center text-amber-300">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+            </svg>
+        </button>
+
+        <!-- 4. Parametric CAD -->
+        <button data-tab="tab-cad" title="CAD" class="nav-tab-btn nav-icon-btn relative z-10 w-10 h-10 rounded-full flex items-center justify-center text-emerald-300">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+            </svg>
+        </button>
+
+        <!-- 5. Pets & Swarm -->
+        <button data-tab="tab-agents" title="Swarm & Pets" class="nav-tab-btn nav-icon-btn relative z-10 w-10 h-10 rounded-full flex items-center justify-center text-purple-300">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5"/>
+            </svg>
+        </button>
+
+        <!-- 6. Synaptic Pulse Burst -->
+        <button id="burst-btn" title="Cascade" class="nav-icon-btn relative z-10 w-10 h-10 rounded-full flex items-center justify-center text-cyan-300">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+        </button>
+
+        <!-- 7. Cortex Visual Controls -->
+        <button data-tab="tab-cortex" title="Cortex" class="nav-tab-btn nav-icon-btn relative z-10 w-10 h-10 rounded-full flex items-center justify-center text-slate-300">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+            </svg>
+        </button>
+    </nav>
+
+    <script>
+        (function () {
+            const state = {
+                autoRotate: true,
+                pulseSpeed: 1.0,
+                glitterIntensity: 1.0,
+                paletteIndex: 0,
+                isDragging: false,
+                previousMouse: { x: 0, y: 0 },
+                userRotation: { x: 0.08, y: -0.35 },
+                angularVelocity: { x: 0, y: 0 },
+                targetZoom: 6.8,
+                currentZoom: 6.8,
+                activeTab: null,
+                backend: 'cynapse',
+                model: 'qwen2.5-coder:14b',
+                micActive: false,
+                selectedDendriteId: null
+            };
+
+            // Subtle Dendrite Memory Stars (blended organically inside the cortex, no bulky spheres)
+            let dendrites = [
+                { id: 'd1', title: 'Orange Pi 6 Plus', body: 'ARM64 release build (jobs=2, 0-swap thermal profile).', lobe: 'frontal', pinned: true, pos: new THREE.Vector3(0.55, 0.42, 1.15) },
+                { id: 'd2', title: 'Cynapse Bridge', body: 'Local reasoning harness active on :38265.', lobe: 'parietal', pinned: true, pos: new THREE.Vector3(-0.78, 0.52, 0.25) },
+                { id: 'd3', title: 'pocket-tts · fantine', body: 'Offline double-buffered sentence synthesis.', lobe: 'temporal', pinned: true, pos: new THREE.Vector3(0.95, -0.22, 0.15) },
+                { id: 'd4', title: 'Extrusion Bracket', body: '80×45×18 mm parametric STL verified.', lobe: 'occipital', pinned: false, pos: new THREE.Vector3(-0.55, 0.22, -1.05) },
+                { id: 'd5', title: 'SearXNG Index', body: 'Local grounded web search with [1] citations.', lobe: 'parietal', pinned: false, pos: new THREE.Vector3(0.68, 0.62, -0.45) }
+            ];
+
+            const palettes = [
+                // MindCorpus Prismatic Strata (Coral -> Amber -> Emerald -> Cyan -> Violet from MC-W01)
+                {
+                    mode: 'prismatic',
+                    primary: new THREE.Color('#38bdf8'),
+                    secondary: new THREE.Color('#c084fc'),
+                    accent: new THREE.Color('#ffffff'),
+                    pulse: new THREE.Color('#fde047')
+                },
+                // Deep Bioluminescent Cyan-Indigo
+                {
+                    mode: 'biolum',
+                    primary: new THREE.Color('#38bdf8'),
+                    secondary: new THREE.Color('#818cf8'),
+                    accent: new THREE.Color('#e0f2fe'),
+                    pulse: new THREE.Color('#7dd3fc')
+                },
+                // Emerald-Gold Synaptic
+                {
+                    mode: 'emerald',
+                    primary: new THREE.Color('#34d399'),
+                    secondary: new THREE.Color('#fbbf24'),
+                    accent: new THREE.Color('#fef3c7'),
+                    pulse: new THREE.Color('#6ee7b7')
+                }
+            ];
+
+            // MindCorpus 7-stop stratigraphic color spectrum (Page 6, 8, 9, 25 of MC-W01)
+            const mcStrataStops = [
+                new THREE.Color('#fb7185'), // coral / notes
+                new THREE.Color('#fb923c'), // amber / drafts
+                new THREE.Color('#facc15'), // gold / questions
+                new THREE.Color('#4ade80'), // emerald / readings
+                new THREE.Color('#22d3ee'), // cyan / conversations
+                new THREE.Color('#60a5fa'), // cobalt / revisions
+                new THREE.Color('#c084fc')  // violet / side tests & dead ends
+            ];
+
+            function sampleMcSpectrum(t) {
+                const clamped = Math.max(0, Math.min(0.9999, t));
+                const scaled = clamped * (mcStrataStops.length - 1);
+                const idx = Math.floor(scaled);
+                const frac = scaled - idx;
+                return mcStrataStops[idx].clone().lerp(mcStrataStops[idx + 1], frac);
+            }
+
+            // Cognitive State Engine (drives regional lobe illumination & synaptic velocity)
+            const cognitive = {
+                phase: 'idle', // 'idle' | 'listening' | 'thinking' | 'responding'
+                intensity: 0.0,
+                targetIntensity: 0.0,
+                speedBoost: 1.0,
+                targetSpeedBoost: 1.0,
+                focusCenter: new THREE.Vector3(0, 0.3, 0.8),
+                focusColor: new THREE.Color('#38bdf8'),
+                secondaryFocus: new THREE.Vector3(0, -0.2, -0.8),
+                secondaryColor: new THREE.Color('#c084fc')
+            };
+
+            function setCognitiveState(phase) {
+                cognitive.phase = phase;
+                if (phase === 'listening') {
+                    // Temporal auditory cortex & Wernicke's area warm up
+                    cognitive.targetIntensity = 0.85;
+                    cognitive.targetSpeedBoost = 1.9;
+                    cognitive.focusCenter.set(1.05, -0.15, 0.25);
+                    cognitive.focusColor.set('#fb7185');
+                    cognitive.secondaryFocus.set(-1.05, -0.15, 0.25);
+                    cognitive.secondaryColor.set('#fb923c');
+                } else if (phase === 'thinking') {
+                    // High-speed prefrontal + parietal synthesis surge
+                    cognitive.targetIntensity = 1.35;
+                    cognitive.targetSpeedBoost = 3.6;
+                    cognitive.focusCenter.set(0.0, 0.55, 1.25);
+                    cognitive.focusColor.set('#38bdf8');
+                    cognitive.secondaryFocus.set(0.0, 0.65, -0.65);
+                    cognitive.secondaryColor.set('#c084fc');
+                    triggerSynapticCascade();
+                } else if (phase === 'responding') {
+                    // Broca's speech + motor cortex rhythmic glow
+                    cognitive.targetIntensity = 1.1;
+                    cognitive.targetSpeedBoost = 2.5;
+                    cognitive.focusCenter.set(-0.85, 0.25, 0.85);
+                    cognitive.focusColor.set('#34d399');
+                    cognitive.secondaryFocus.set(0.75, 0.15, 0.75);
+                    cognitive.secondaryColor.set('#facc15');
+                } else {
+                    cognitive.targetIntensity = 0.0;
+                    cognitive.targetSpeedBoost = 1.0;
+                }
+            }
+
+            // --- Three.js Scene ---
+            const container = document.getElementById('neural-canvas-container');
+            const scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x030407, 0.036);
+
+            const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 0.12, state.currentZoom);
+
+            const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            const brainGroup = new THREE.Group();
+            scene.add(brainGroup);
+
+            // Subtle Volumetric Core Aura (gives depth & inner bioluminescence without blocking particles)
+            const coreAuraGeo = new THREE.SphereGeometry(1.15, 24, 24);
+            coreAuraGeo.scale(1.18, 0.92, 1.48);
+            const coreAuraMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uActivity: { value: 0 },
+                    uColorA: { value: new THREE.Color('#1e3a8a') },
+                    uColorB: { value: new THREE.Color('#311042') }
+                },
+                vertexShader: `
+                    varying vec3 vNormal;
+                    varying vec3 vPos;
+                    void main() {
+                        vNormal = normalize(normalMatrix * normal);
+                        vPos = position;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uTime;
+                    uniform float uActivity;
+                    uniform vec3 uColorA;
+                    uniform vec3 uColorB;
+                    varying vec3 vNormal;
+                    varying vec3 vPos;
+                    void main() {
+                        float fresnel = pow(1.0 - abs(dot(vNormal, vec3(0.0, 0.0, 1.0))), 2.4);
+                        float pulse = 0.75 + 0.25 * sin(uTime * 2.2 + vPos.z * 2.0);
+                        vec3 col = mix(uColorA, uColorB, clamp((vPos.z + 1.5) / 3.0, 0.0, 1.0));
+                        gl_FragColor = vec4(col * (1.2 + uActivity * 1.4), (0.045 + uActivity * 0.06) * (1.0 - fresnel * 0.7) * pulse);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+            brainGroup.add(new THREE.Mesh(coreAuraGeo, coreAuraMat));
+
+            // --- Cortical Glitter Point Cloud ---
+            function computeNodeColor(x, y, z, isHub, paletteIdx) {
+                const pal = palettes[paletteIdx];
+                if (pal.mode === 'prismatic') {
+                    // Stratigraphic spectrum across cortical layers & anterior-posterior axis
+                    const t = clamp01((y + 1.1) * 0.34 + (z + 1.9) * 0.14 + Math.sin(x * 2.5) * 0.08);
+                    const c = sampleMcSpectrum(t);
+                    if (isHub) c.lerp(new THREE.Color('#ffffff'), 0.58);
+                    return c;
+                }
+                const mixRatio = clamp01((z + 2.0) / 4.0);
+                const c = pal.primary.clone().lerp(pal.secondary, mixRatio);
+                if (isHub) c.lerp(pal.accent, 0.65);
+                return c;
+            }
+
+            function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
+            function generateCorticalNodes(count) {
+                const positions = new Float32Array(count * 3);
+                const sizes = new Float32Array(count);
+                const phases = new Float32Array(count);
+                const colors = new Float32Array(count * 3);
+                const isHubArr = new Uint8Array(count);
+                const nodeVectors = [];
+
+                for (let i = 0; i < count; i++) {
+                    const hemi = i % 2 === 0 ? 1 : -1;
+                    const u = Math.random();
+                    const v = Math.random();
+                    const theta = u * Math.PI * 2;
+                    const phi = Math.acos(2 * v - 1);
+
+                    // Higher cortical surface density for crisp gyri/sulci silhouette
+                    const isSurface = Math.random() > 0.14;
+                    const rBase = isSurface ? (0.88 + Math.random() * 0.12) : (0.22 + Math.random() * 0.64);
+
+                    let x = Math.sin(phi) * Math.cos(theta) * 1.46;
+                    let y = Math.cos(phi) * 1.34;
+                    let z = Math.sin(phi) * Math.sin(theta) * 1.98;
+
+                    if (y < -0.2) y *= 0.60;
+                    if (z > 0.4) {
+                        x *= 1.0 - (z - 0.4) * 0.16;
+                        y *= 1.0 - (z - 0.4) * 0.10;
+                    }
+                    if (y < 0.05 && y > -0.75 && z > -0.6 && z < 0.65) {
+                        x += Math.sign(x) * 0.25 * Math.sin(((z + 0.6) / 1.25) * Math.PI);
+                        y -= 0.14;
+                    }
+                    if (z < -0.65 && y < -0.15) {
+                        x *= 0.78;
+                        y -= 0.26;
+                        z *= 0.92;
+                    }
+
+                    // Multi-harmonic gyri ridges for lifelike cortical folding
+                    const primaryFold = Math.sin(x * 6.8 + z * 4.2) * Math.cos(y * 6.8 - z * 3.6) * 0.068;
+                    const fineSulci = Math.sin(x * 13.5 - y * 11.0 + z * 9.0) * 0.022;
+                    const radialScale = rBase + (isSurface ? (primaryFold + fineSulci) : 0);
+
+                    x *= radialScale;
+                    y *= radialScale;
+                    z *= radialScale;
+
+                    const medialGap = 0.085 + 0.065 * Math.max(0, y);
+                    x = Math.abs(x) * hemi + hemi * medialGap;
+
+                    positions[i * 3] = x;
+                    positions[i * 3 + 1] = y;
+                    positions[i * 3 + 2] = z;
+                    nodeVectors.push(new THREE.Vector3(x, y, z));
+
+                    const isHub = Math.random() > 0.925 ? 1 : 0;
+                    isHubArr[i] = isHub;
+                    sizes[i] = isHub ? (2.6 + Math.random() * 2.2) : (0.62 + Math.random() * 1.32);
+                    phases[i] = Math.random() * Math.PI * 2;
+
+                    const c = computeNodeColor(x, y, z, isHub === 1, state.paletteIndex);
+                    colors[i * 3] = c.r;
+                    colors[i * 3 + 1] = c.g;
+                    colors[i * 3 + 2] = c.b;
+                }
+                return { positions, sizes, phases, colors, isHubArr, nodeVectors };
+            }
+
+            const NODE_COUNT = 5400;
+            const brainData = generateCorticalNodes(NODE_COUNT);
+
+            const nodeGeometry = new THREE.BufferGeometry();
+            nodeGeometry.setAttribute('position', new THREE.BufferAttribute(brainData.positions, 3));
+            nodeGeometry.setAttribute('aSize', new THREE.BufferAttribute(brainData.sizes, 1));
+            nodeGeometry.setAttribute('aPhase', new THREE.BufferAttribute(brainData.phases, 1));
+            nodeGeometry.setAttribute('aColor', new THREE.BufferAttribute(brainData.colors, 3));
+
+            const nodeMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uGlitter: { value: 1.0 },
+                    uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
+                    uHoverPoint: { value: new THREE.Vector3(999, 999, 999) },
+                    uCogIntensity: { value: 0.0 },
+                    uCogFocusA: { value: new THREE.Vector3(0, 0.5, 1.1) },
+                    uCogColorA: { value: new THREE.Color('#38bdf8') },
+                    uCogFocusB: { value: new THREE.Vector3(0, 0.4, -0.8) },
+                    uCogColorB: { value: new THREE.Color('#c084fc') }
+                },
+                vertexShader: `
+                    attribute float aSize;
+                    attribute float aPhase;
+                    attribute vec3 aColor;
+                    uniform float uTime;
+                    uniform float uGlitter;
+                    uniform float uPixelRatio;
+                    uniform vec3 uHoverPoint;
+                    uniform float uCogIntensity;
+                    uniform vec3 uCogFocusA;
+                    uniform vec3 uCogColorA;
+                    uniform vec3 uCogFocusB;
+                    uniform vec3 uCogColorB;
+                    varying vec3 vColor;
+                    varying float vAlpha;
+
+                    void main() {
+                        vec3 pos = position;
+                        float waveRate = 1.2 + uCogIntensity * 2.4;
+                        pos += normalize(position + vec3(0.001)) * (sin(uTime * waveRate + aPhase) * (0.012 + uCogIntensity * 0.01));
+                        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                        
+                        float sparkle = 0.55 + 0.45 * sin(uTime * (2.8 + uCogIntensity * 3.5) + aPhase * 3.0);
+                        float flash = pow(max(0.0, sin(uTime * (1.9 + uCogIntensity * 2.8) + aPhase * 7.0)), 12.0) * (1.8 + uCogIntensity * 1.4);
+                        float hoverBoost = smoothstep(0.95, 0.0, distance(position, uHoverPoint)) * 2.2;
+
+                        // Regional Cognitive Illumination (illuminates active brain lobes during thinking/speaking)
+                        float lobeWaveA = 0.65 + 0.35 * sin(uTime * 5.0 + position.z * 2.5);
+                        float lobeWaveB = 0.65 + 0.35 * cos(uTime * 4.2 - position.x * 2.5);
+                        float regionGlowA = smoothstep(1.45, 0.0, distance(position, uCogFocusA)) * uCogIntensity * lobeWaveA;
+                        float regionGlowB = smoothstep(1.35, 0.0, distance(position, uCogFocusB)) * uCogIntensity * lobeWaveB;
+                        float totalRegion = regionGlowA + regionGlowB;
+
+                        vec3 tinted = aColor;
+                        tinted = mix(tinted, uCogColorA + vec3(0.28), clamp(regionGlowA * 0.85, 0.0, 1.0));
+                        tinted = mix(tinted, uCogColorB + vec3(0.25), clamp(regionGlowB * 0.80, 0.0, 1.0));
+                        vColor = tinted * (1.0 + totalRegion * 0.75);
+
+                        float finalSize = aSize * (0.8 + sparkle * 0.5 + flash + hoverBoost + totalRegion * 1.55) * uGlitter;
+                        gl_PointSize = finalSize * uPixelRatio * (14.5 / -mvPosition.z);
+                        vAlpha = clamp((0.36 + sparkle * 0.44 + flash * 0.6 + hoverBoost * 0.5 + totalRegion * 0.65) * uGlitter, 0.1, 1.0);
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    varying vec3 vColor;
+                    varying float vAlpha;
+                    void main() {
+                        vec2 coord = gl_PointCoord - vec2(0.5);
+                        float dist = length(coord);
+                        if (dist > 0.5) discard;
+                        float core = smoothstep(0.18, 0.0, dist);
+                        float halo = pow(1.0 - dist * 2.0, 2.2);
+                        gl_FragColor = vec4(vColor * (core * 1.45 + halo * 0.8) + vec3(core * 0.42), vAlpha * halo);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+
+            const cortexPoints = new THREE.Points(nodeGeometry, nodeMaterial);
+            brainGroup.add(cortexPoints);
+
+            // --- Subtle Star-like Dendrite Memory Points (Blends seamlessly into the glitter brain!) ---
+            let dendritePointsObj = null;
+            const dendriteRayTargets = new THREE.Group();
+            brainGroup.add(dendriteRayTargets);
+
+            function rebuildSubtleDendrites() {
+                if (dendritePointsObj) brainGroup.remove(dendritePointsObj);
+                while (dendriteRayTargets.children.length > 0) {
+                    dendriteRayTargets.remove(dendriteRayTargets.children[0]);
+                }
+
+                const count = dendrites.length;
+                const posArr = new Float32Array(count * 3);
+                const colArr = new Float32Array(count * 3);
+                const sizeArr = new Float32Array(count);
+
+                dendrites.forEach((d, idx) => {
+                    posArr[idx * 3] = d.pos.x;
+                    posArr[idx * 3 + 1] = d.pos.y;
+                    posArr[idx * 3 + 2] = d.pos.z;
+
+                    // Warm starlight gold for pinned, delicate ice-cyan for unpinned
+                    const c = d.pinned ? new THREE.Color('#fde68a') : new THREE.Color('#bae6fd');
+                    colArr[idx * 3] = c.r;
+                    colArr[idx * 3 + 1] = c.g;
+                    colArr[idx * 3 + 2] = c.b;
+                    sizeArr[idx] = d.pinned ? 5.2 : 4.2;
+
+                    // Invisible hit target for effortless clicking without visual clutter
+                    const hitSphere = new THREE.Mesh(
+                        new THREE.SphereGeometry(0.16, 8, 8),
+                        new THREE.MeshBasicMaterial({ visible: false })
+                    );
+                    hitSphere.position.copy(d.pos);
+                    hitSphere.userData = { dendriteId: d.id };
+                    dendriteRayTargets.add(hitSphere);
+                });
+
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+                geo.setAttribute('aColor', new THREE.BufferAttribute(colArr, 3));
+                geo.setAttribute('aSize', new THREE.BufferAttribute(sizeArr, 1));
+
+                const mat = new THREE.ShaderMaterial({
+                    uniforms: {
+                        uTime: { value: 0 },
+                        uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) }
+                    },
+                    vertexShader: `
+                        attribute vec3 aColor;
+                        attribute float aSize;
+                        uniform float uTime;
+                        uniform float uPixelRatio;
+                        varying vec3 vColor;
+                        varying float vPulse;
+                        void main() {
+                            vColor = aColor;
+                            vPulse = 0.75 + 0.25 * sin(uTime * 3.2 + position.x * 5.0);
+                            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                            gl_PointSize = aSize * vPulse * uPixelRatio * (16.0 / -mvPosition.z);
+                            gl_Position = projectionMatrix * mvPosition;
+                        }
+                    `,
+                    fragmentShader: `
+                        varying vec3 vColor;
+                        varying float vPulse;
+                        void main() {
+                            vec2 uv = gl_PointCoord - vec2(0.5);
+                            float d = length(uv);
+                            if (d > 0.5) discard;
+                            // Delicate 4-point star glint + soft radial glow
+                            float core = smoothstep(0.16, 0.0, d);
+                            float crossGlint = exp(-abs(uv.x) * 18.0) * exp(-abs(uv.y) * 5.0) + exp(-abs(uv.y) * 18.0) * exp(-abs(uv.x) * 5.0);
+                            float halo = pow(1.0 - d * 2.0, 2.8);
+                            float alpha = clamp((core + crossGlint * 0.65 + halo * 0.55) * vPulse, 0.0, 1.0);
+                            gl_FragColor = vec4(vColor * 1.35, alpha);
+                        }
+                    `,
+                    transparent: true,
+                    depthWrite: false,
+                    blending: THREE.AdditiveBlending
+                });
+
+                dendritePointsObj = new THREE.Points(geo, mat);
+                brainGroup.add(dendritePointsObj);
+                renderMemoryDrawerList();
+            }
+
+            // --- Streaming Synapses ---
+            const MAX_PATHWAYS = 380;
+            const CURVE_SEGMENTS = 26;
+            const pathways = [];
+
+            const synapseLinePositions = new Float32Array(MAX_PATHWAYS * CURVE_SEGMENTS * 2 * 3);
+            const synapseLineAlphas = new Float32Array(MAX_PATHWAYS * CURVE_SEGMENTS * 2);
+            const synapseLineColors = new Float32Array(MAX_PATHWAYS * CURVE_SEGMENTS * 2 * 3);
+
+            const synapseGeometry = new THREE.BufferGeometry();
+            synapseGeometry.setAttribute('position', new THREE.BufferAttribute(synapseLinePositions, 3));
+            synapseGeometry.setAttribute('aAlpha', new THREE.BufferAttribute(synapseLineAlphas, 1));
+            synapseGeometry.setAttribute('aColor', new THREE.BufferAttribute(synapseLineColors, 3));
+
+            const synapseMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uCogIntensity: { value: 0.0 },
+                    uCogFocus: { value: new THREE.Vector3(0, 0.5, 1.1) },
+                    uCogColor: { value: new THREE.Color('#38bdf8') }
+                },
+                vertexShader: `
+                    attribute float aAlpha;
+                    attribute vec3 aColor;
+                    uniform float uCogIntensity;
+                    uniform vec3 uCogFocus;
+                    uniform vec3 uCogColor;
+                    varying float vAlpha;
+                    varying vec3 vColor;
+                    void main() {
+                        float regionBoost = smoothstep(1.5, 0.0, distance(position, uCogFocus)) * uCogIntensity;
+                        vAlpha = clamp(aAlpha + regionBoost * 0.38, 0.0, 1.0);
+                        vColor = mix(aColor, uCogColor + vec3(0.35), clamp(regionBoost * 0.85, 0.0, 1.0));
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    varying float vAlpha;
+                    varying vec3 vColor;
+                    void main() {
+                        if (vAlpha <= 0.005) discard;
+                        gl_FragColor = vec4(vColor, vAlpha);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+
+            brainGroup.add(new THREE.LineSegments(synapseGeometry, synapseMaterial));
+
+            const pulsePositions = new Float32Array(MAX_PATHWAYS * 3);
+            const pulseSizes = new Float32Array(MAX_PATHWAYS);
+            const pulseColors = new Float32Array(MAX_PATHWAYS * 3);
+            const pulseGeometry = new THREE.BufferGeometry();
+            pulseGeometry.setAttribute('position', new THREE.BufferAttribute(pulsePositions, 3));
+            pulseGeometry.setAttribute('aSize', new THREE.BufferAttribute(pulseSizes, 1));
+            pulseGeometry.setAttribute('aColor', new THREE.BufferAttribute(pulseColors, 3));
+
+            const pulseMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) }
+                },
+                vertexShader: `
+                    attribute float aSize;
+                    attribute vec3 aColor;
+                    uniform float uPixelRatio;
+                    varying float vSize;
+                    varying vec3 vColor;
+                    void main() {
+                        vSize = aSize;
+                        vColor = aColor;
+                        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                        gl_PointSize = aSize * uPixelRatio * (24.0 / -mvPosition.z);
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    varying float vSize;
+                    varying vec3 vColor;
+                    void main() {
+                        if (vSize <= 0.01) discard;
+                        float d = length(gl_PointCoord - vec2(0.5));
+                        if (d > 0.5) discard;
+                        float glow = pow(1.0 - d * 2.0, 1.9);
+                        gl_FragColor = vec4(vColor + vec3(0.55 * glow), glow);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+
+            brainGroup.add(new THREE.Points(pulseGeometry, pulseMaterial));
+
+            function recolorSynapses() {
+                const colAttr = synapseGeometry.getAttribute('aColor');
+                const pColAttr = pulseGeometry.getAttribute('aColor');
+                const pal = palettes[state.paletteIndex];
+                let vIdx = 0;
+
+                for (let i = 0; i < MAX_PATHWAYS; i++) {
+                    const p = pathways[i];
+                    const mid = p.points[Math.floor(CURVE_SEGMENTS / 2)];
+                    const t = clamp01((mid.y + 1.1) * 0.34 + (mid.z + 1.9) * 0.14);
+                    const c = pal.mode === 'prismatic'
+                        ? sampleMcSpectrum(t)
+                        : pal.primary.clone().lerp(pal.secondary, clamp01((mid.z + 1.8) / 3.6));
+
+                    pColAttr.setXYZ(i, Math.min(1, c.r + 0.25), Math.min(1, c.g + 0.25), Math.min(1, c.b + 0.25));
+
+                    for (let s = 0; s < CURVE_SEGMENTS; s++) {
+                        colAttr.setXYZ(vIdx, c.r, c.g, c.b);
+                        colAttr.setXYZ(vIdx + 1, c.r, c.g, c.b);
+                        vIdx += 2;
+                    }
+                }
+                colAttr.needsUpdate = true;
+                pColAttr.needsUpdate = true;
+            }
+
+            function buildSynapticPathways() {
+                const nodes = brainData.nodeVectors;
+                for (let i = 0; i < MAX_PATHWAYS; i++) {
+                    const idxA = Math.floor(Math.random() * nodes.length);
+                    let idxB = Math.floor(Math.random() * nodes.length);
+                    const wantCross = i % 4 === 0;
+
+                    for (let attempt = 0; attempt < 25; attempt++) {
+                        const candidate = Math.floor(Math.random() * nodes.length);
+                        const dist = nodes[idxA].distanceTo(nodes[candidate]);
+                        const sameHemi = Math.sign(nodes[idxA].x) === Math.sign(nodes[candidate].x);
+                        if ((!wantCross && sameHemi && dist > 0.45 && dist < 1.55) ||
+                            (wantCross && !sameHemi && dist > 0.5 && dist < 1.8)) {
+                            idxB = candidate;
+                            break;
+                        }
+                    }
+
+                    const start = nodes[idxA];
+                    const end = nodes[idxB];
+                    const mid = start.clone().add(end).multiplyScalar(0.5).multiplyScalar(wantCross ? 0.55 : 0.82);
+                    const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
+
+                    pathways.push({
+                        points: curve.getPoints(CURVE_SEGMENTS),
+                        progress: Math.random(),
+                        speed: 0.25 + Math.random() * 0.55,
+                        active: Math.random() > 0.25,
+                        cooldown: Math.random() * 2.0,
+                        baseOpacity: 0.085 + Math.random() * 0.105
+                    });
+                }
+                recolorSynapses();
+            }
+            buildSynapticPathways();
+
+            function triggerSynapticCascade(originPoint = null) {
+                pathways.forEach((p) => {
+                    if (originPoint) {
+                        if (p.points[0].distanceTo(originPoint) < 1.35) {
+                            p.active = true;
+                            p.progress = 0;
+                            p.speed = 0.85 + Math.random() * 0.55;
+                        }
+                    } else if (Math.random() > 0.28) {
+                        p.active = true;
+                        p.progress = Math.random() * 0.22;
+                    }
+                });
+            }
+
+            // Ambient Deep-Space Dust
+            const dustCount = 320;
+            const dustPos = new Float32Array(dustCount * 3);
+            for (let i = 0; i < dustCount; i++) {
+                dustPos[i * 3] = (Math.random() - 0.5) * 24;
+                dustPos[i * 3 + 1] = (Math.random() - 0.5) * 16;
+                dustPos[i * 3 + 2] = (Math.random() - 0.5) * 18;
+            }
+            const dustGeo = new THREE.BufferGeometry();
+            dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+            const ambientDust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: 0x64748b, size: 0.03, transparent: true, opacity: 0.28 }));
+            scene.add(ambientDust);
+
+            // --- Raycasting for Cortical Nodes & Subtle Dendrites ---
+            const raycaster = new THREE.Raycaster();
+            raycaster.params.Points.threshold = 0.22;
+            const mouseNDC = new THREE.Vector2(-99, -99);
+
+            function inspectRaycasting() {
+                raycaster.setFromCamera(mouseNDC, camera);
+                const dHits = raycaster.intersectObjects(dendriteRayTargets.children, false);
+                if (dHits.length > 0) {
+                    container.style.cursor = 'pointer';
+                    return { type: 'dendrite', id: dHits[0].object.userData.dendriteId, point: dHits[0].object.position.clone() };
+                }
+                container.style.cursor = state.isDragging ? 'grabbing' : 'grab';
+
+                const intersects = raycaster.intersectObject(cortexPoints);
+                if (intersects.length > 0) {
+                    const localPt = brainGroup.worldToLocal(intersects[0].point.clone());
+                    nodeMaterial.uniforms.uHoverPoint.value.copy(localPt);
+                    return { type: 'cortex', point: localPt };
+                } else {
+                    nodeMaterial.uniforms.uHoverPoint.value.set(999, 999, 999);
+                    return null;
+                }
+            }
+
+            // --- Dendrite Whisper Card & Memory List ---
+            function showDendriteWhisper(id) {
+                const d = dendrites.find(item => item.id === id);
+                if (!d) return;
+                state.selectedDendriteId = id;
+                document.getElementById('dendrite-lobe-tag').textContent = `● ${d.lobe}`;
+                document.getElementById('dendrite-title').textContent = d.title;
+                document.getElementById('dendrite-body').textContent = d.body;
+                document.getElementById('dendrite-pin-btn').style.opacity = d.pinned ? '1' : '0.4';
+                document.getElementById('dendrite-whisper-card').classList.remove('hidden');
+                triggerSynapticCascade(d.pos);
+            }
+
+            document.getElementById('dendrite-study-jump').addEventListener('click', () => {
+                const d = dendrites.find(item => item.id === state.selectedDendriteId);
+                if (!d) return;
+                document.getElementById('dendrite-whisper-card').classList.add('hidden');
+                openStudioModal('pane-learn');
+                document.getElementById('study-topic-input').value = `${d.title}: ${d.body}`;
+                runDeepTutorSynthesis(`${d.title}: ${d.body}`);
+            });
+
+            document.getElementById('dendrite-close-btn').addEventListener('click', () => {
+                document.getElementById('dendrite-whisper-card').classList.add('hidden');
+            });
+
+            document.getElementById('dendrite-pin-btn').addEventListener('click', () => {
+                const d = dendrites.find(item => item.id === state.selectedDendriteId);
+                if (!d) return;
+                d.pinned = !d.pinned;
+                rebuildSubtleDendrites();
+                showDendriteWhisper(d.id);
+            });
+
+            function renderMemoryDrawerList() {
+                const list = document.getElementById('memory-pill-list');
+                list.innerHTML = '';
+                const dbCounter = document.getElementById('studio-db-count');
+                if (dbCounter) dbCounter.textContent = `${dendrites.length} brain nodes`;
+                dendrites.forEach(d => {
+                    const btn = document.createElement('button');
+                    btn.className = 'w-full text-left px-2.5 py-1.5 rounded-xl bg-white/[0.03] hover:bg-white/10 flex items-center justify-between text-[11px] transition-colors';
+                    btn.innerHTML = `<span class="text-slate-200 truncate">${d.title}</span><span class="text-[10px] ${d.pinned ? 'text-amber-300' : 'text-sky-300/60'}">${d.pinned ? '★' : '·'}</span>`;
+                    btn.addEventListener('click', () => {
+                        closeKineticDrawer();
+                        showDendriteWhisper(d.id);
+                    });
+                    list.appendChild(btn);
+                });
+                renderStudyNodesList();
+            }
+
+            function renderStudyNodesList() {
+                const container = document.getElementById('study-nodes-list');
+                if (!container) return;
+                container.innerHTML = '';
+                dendrites.slice().reverse().forEach(d => {
+                    const item = document.createElement('div');
+                    item.className = 'px-2.5 py-1.5 rounded-xl bg-white/[0.04] border border-white/5 flex items-center justify-between gap-2';
+                    item.innerHTML = `
+                        <div class="truncate">
+                            <span class="text-amber-300 mr-1">${d.pinned ? '★' : '•'}</span>
+                            <span class="text-slate-200 font-medium">${d.title}</span>
+                        </div>
+                        <span class="text-[9px] font-mono text-slate-500 shrink-0">${d.lobe}</span>
+                    `;
+                    container.appendChild(item);
+                });
+            }
+
+            function plantBrainMemoryNode(title, body, lobe = 'frontal', pinned = true) {
+                const lobes = {
+                    frontal: new THREE.Vector3((Math.random() - 0.5) * 1.1, 0.35 + Math.random() * 0.45, 1.0 + Math.random() * 0.4),
+                    parietal: new THREE.Vector3((Math.random() - 0.5) * 1.3, 0.5 + Math.random() * 0.4, -0.3 + Math.random() * 0.5),
+                    temporal: new THREE.Vector3((Math.random() > 0.5 ? 1 : -1) * (0.85 + Math.random() * 0.3), -0.25 + Math.random() * 0.25, 0.1 + Math.random() * 0.4),
+                    occipital: new THREE.Vector3((Math.random() - 0.5) * 1.0, 0.1 + Math.random() * 0.4, -1.1 - Math.random() * 0.35)
+                };
+                const pos = lobes[lobe] || lobes.frontal;
+                const node = {
+                    id: 'd_' + Date.now() + '_' + Math.floor(Math.random() * 999),
+                    title,
+                    body,
+                    lobe,
+                    pinned,
+                    pos
+                };
+                dendrites.push(node);
+                rebuildSubtleDendrites();
+                triggerSynapticCascade(pos);
+                return node;
+            }
+
+            document.getElementById('prune-memory-btn').addEventListener('click', () => {
+                dendrites = dendrites.filter(d => d.pinned);
+                rebuildSubtleDendrites();
+            });
+
+            rebuildSubtleDendrites();
+
+            // --- 3D Click-and-Drag Orbit & Zoom ---
+            let pointerDownPos = { x: 0, y: 0 };
+
+            container.addEventListener('pointerdown', (e) => {
+                closeKineticDrawer();
+                state.isDragging = true;
+                state.previousMouse = { x: e.clientX, y: e.clientY };
+                pointerDownPos = { x: e.clientX, y: e.clientY };
+                state.angularVelocity = { x: 0, y: 0 };
+            });
+
+            window.addEventListener('pointermove', (e) => {
+                mouseNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
+                mouseNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+                if (state.isDragging) {
+                    const dx = e.clientX - state.previousMouse.x;
+                    const dy = e.clientY - state.previousMouse.y;
+                    state.angularVelocity.y = dx * 0.007;
+                    state.angularVelocity.x = dy * 0.007;
+                    state.userRotation.y += state.angularVelocity.y;
+                    state.userRotation.x = Math.max(-1.35, Math.min(1.35, state.userRotation.x + state.angularVelocity.x));
+                    state.previousMouse = { x: e.clientX, y: e.clientY };
+                }
+            });
+
+            window.addEventListener('pointerup', (e) => {
+                if (!state.isDragging) return;
+                state.isDragging = false;
+                if (Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y) < 6) {
+                    const hit = inspectRaycasting();
+                    if (hit && hit.type === 'dendrite') showDendriteWhisper(hit.id);
+                    else if (hit && hit.type === 'cortex') triggerSynapticCascade(hit.point);
+                }
+            });
+
+            container.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                state.targetZoom = Math.max(3.6, Math.min(12.5, state.targetZoom + e.deltaY * 0.004));
+            }, { passive: false });
+
+            // --- Bubble Head Companion & One-Tap Mic ---
+            const bubbleHeadBtn = document.getElementById('bubble-head-btn');
+            const bubblePopover = document.getElementById('bubble-chat-popover');
+            const bubbleTranscript = document.getElementById('bubble-transcript');
+            const bubbleStatusPill = document.getElementById('bubble-status-pill');
+            const bubbleFaceSvg = document.getElementById('bubble-face-svg');
+            const bubbleVoiceBars = document.getElementById('bubble-voice-bars');
+            const bubbleMouth = document.getElementById('bubble-mouth');
+            const dockMicBtn = document.getElementById('dock-mic-btn');
+            const micPulseRing = document.getElementById('mic-pulse-ring');
+
+            bubbleHeadBtn.addEventListener('click', () => {
+                bubblePopover.classList.toggle('hidden');
+                triggerSynapticCascade();
+            });
+
+            function setBubbleExpression(mode) {
+                if (mode === 'listening') {
+                    setCognitiveState('listening');
+                    bubbleHeadBtn.classList.add('listening');
+                    bubbleFaceSvg.classList.add('hidden');
+                    bubbleVoiceBars.classList.remove('hidden');
+                    bubbleStatusPill.textContent = 'listening...';
+                    bubbleStatusPill.classList.remove('opacity-0');
+                    micPulseRing.classList.remove('hidden');
+                } else if (mode === 'thinking') {
+                    setCognitiveState('thinking');
+                    bubbleHeadBtn.classList.remove('listening');
+                    bubbleFaceSvg.classList.remove('hidden');
+                    bubbleVoiceBars.classList.add('hidden');
+                    bubbleMouth.setAttribute('d', 'M15 23.5Q18 23.5 21 23.5');
+                    bubbleStatusPill.textContent = 'thinking...';
+                    bubbleStatusPill.classList.remove('opacity-0');
+                    micPulseRing.classList.add('hidden');
+                } else if (mode === 'speaking') {
+                    setCognitiveState('responding');
+                    bubbleHeadBtn.classList.remove('listening');
+                    bubbleFaceSvg.classList.remove('hidden');
+                    bubbleVoiceBars.classList.add('hidden');
+                    bubbleMouth.setAttribute('d', 'M14 21.5Q18 27.5 22 21.5Q18 19.5 14 21.5Z');
+                    bubbleStatusPill.textContent = 'fantine · tts';
+                    bubbleStatusPill.classList.remove('opacity-0');
+                    micPulseRing.classList.add('hidden');
+                    setTimeout(() => {
+                        setCognitiveState('idle');
+                        bubbleMouth.setAttribute('d', 'M14 22.5Q18 25.5 22 22.5');
+                        bubbleStatusPill.classList.add('opacity-0');
+                    }, 2600);
+                } else {
+                    setCognitiveState('idle');
+                    bubbleHeadBtn.classList.remove('listening');
+                    bubbleFaceSvg.classList.remove('hidden');
+                    bubbleVoiceBars.classList.add('hidden');
+                    bubbleMouth.setAttribute('d', 'M14 22.5Q18 25.5 22 22.5');
+                    bubbleStatusPill.classList.add('opacity-0');
+                    micPulseRing.classList.add('hidden');
+                }
+            }
+
+            function toggleMic() {
+                state.micActive = !state.micActive;
+                if (state.micActive) {
+                    setBubbleExpression('listening');
+                    triggerSynapticCascade();
+                } else {
+                    setBubbleExpression('thinking');
+                    setTimeout(() => {
+                        setBubbleExpression('speaking');
+                        bubblePopover.classList.remove('hidden');
+                        appendBubbleMsg('assistant', `Routed voice via ${state.backend} (${state.model}).`);
+                    }, 950);
+                }
+            }
+
+            dockMicBtn.addEventListener('click', toggleMic);
+            window.addEventListener('keydown', (e) => {
+                if (e.ctrlKey && e.key.toLowerCase() === 'm') {
+                    e.preventDefault();
+                    toggleMic();
+                }
+            });
+
+            function appendBubbleMsg(role, text) {
+                const div = document.createElement('div');
+                div.className = role === 'user'
+                    ? 'ml-auto max-w-[85%] bg-sky-500/20 border border-sky-400/25 rounded-2xl px-3 py-1.5 text-white'
+                    : 'mr-auto max-w-[90%] bg-white/[0.05] border border-white/10 rounded-2xl px-3 py-1.5 text-slate-200';
+                div.textContent = text;
+                bubbleTranscript.appendChild(div);
+                bubbleTranscript.scrollTop = bubbleTranscript.scrollHeight;
+            }
+
+            document.getElementById('bubble-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const input = document.getElementById('bubble-input');
+                const val = input.value.trim();
+                if (!val) return;
+                input.value = '';
+                appendBubbleMsg('user', val);
+                setBubbleExpression('thinking');
+
+                setTimeout(() => {
+                    setBubbleExpression('speaking');
+                    appendBubbleMsg('assistant', `${state.backend} · ${state.model}: processed.`);
+                }, 1150);
+            });
+
+            // --- Techartist Kinetic Navbar Sliding Pill & Drawers ---
+            const navBar = document.getElementById('kinetic-navbar');
+            const activePill = document.getElementById('nav-active-pill');
+            const kineticDrawer = document.getElementById('kinetic-drawer');
+            const tabButtons = document.querySelectorAll('.nav-tab-btn');
+            const drawerTabs = document.querySelectorAll('.drawer-tab');
+
+            function moveSlidingPill(targetBtn) {
+                if (!targetBtn) {
+                    activePill.style.opacity = '0';
+                    return;
+                }
+                const navRect = navBar.getBoundingClientRect();
+                const btnRect = targetBtn.getBoundingClientRect();
+                const offsetX = btnRect.left - navRect.left - 6;
+                activePill.style.width = btnRect.width + 'px';
+                activePill.style.transform = `translateX(${offsetX}px)`;
+                activePill.style.opacity = '1';
+            }
+
+            function closeKineticDrawer() {
+                state.activeTab = null;
+                moveSlidingPill(null);
+                kineticDrawer.classList.add('opacity-0', 'pointer-events-none', 'translate-y-3', 'scale-95');
+                kineticDrawer.classList.remove('opacity-100', 'pointer-events-auto', 'translate-y-0', 'scale-100');
+            }
+
+            tabButtons.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const tabId = btn.dataset.tab;
+                    if (state.activeTab === tabId) {
+                        closeKineticDrawer();
+                        return;
+                    }
+                    state.activeTab = tabId;
+                    moveSlidingPill(btn);
+
+                    drawerTabs.forEach(t => t.classList.add('hidden'));
+                    document.getElementById(tabId).classList.remove('hidden');
+
+                    kineticDrawer.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-3', 'scale-95');
+                    kineticDrawer.classList.add('opacity-100', 'pointer-events-auto', 'translate-y-0', 'scale-100');
+
+                    if (tabId === 'tab-cad') initMiniCadPreview('box');
+                });
+            });
+
+            // --- Backend Switcher ---
+            function switchBackend(name) {
+                state.backend = name;
+                document.getElementById('backend-short-label').textContent = name;
+                document.getElementById('backend-dot').className = name === 'cynapse'
+                    ? 'w-2 h-2 rounded-full bg-sky-400 shadow-[0_0_10px_#38bdf8]'
+                    : 'w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]';
+
+                document.querySelectorAll('.bridge-btn, .studio-backend-btn').forEach(b => {
+                    const active = b.dataset.backend === name;
+                    if (b.classList.contains('studio-backend-btn')) {
+                        b.className = active
+                            ? 'studio-backend-btn py-2.5 rounded-2xl text-xs font-mono bg-sky-500/20 text-sky-200 border border-sky-400/35'
+                            : 'studio-backend-btn py-2.5 rounded-2xl text-xs font-mono bg-white/5 text-slate-400 border border-white/10';
+                    } else {
+                        b.className = active
+                            ? 'bridge-btn py-2 rounded-2xl text-[11px] font-mono bg-sky-500/20 text-sky-300 border border-sky-400/35'
+                            : 'bridge-btn py-2 rounded-2xl text-[11px] font-mono bg-white/5 text-slate-400 border border-white/10';
+                    }
+                });
+            }
+
+            document.getElementById('backend-toggle-dot').addEventListener('click', () => {
+                switchBackend(state.backend === 'cynapse' ? 'ollama' : 'cynapse');
+            });
+            document.querySelectorAll('.bridge-btn, .studio-backend-btn').forEach(b => b.addEventListener('click', () => switchBackend(b.dataset.backend)));
+            document.getElementById('model-select').addEventListener('change', (e) => {
+                state.model = e.target.value;
+                document.getElementById('studio-model-select').value = state.model;
+            });
+            document.getElementById('studio-model-select').addEventListener('change', (e) => {
+                state.model = e.target.value;
+                document.getElementById('model-select').value = state.model;
+            });
+
+            // =========================================================================
+            // INTERFACE STUDIO: NotebookLM DeepTutor, Habitica RPG & TTS
+            // =========================================================================
+            const studioModal = document.getElementById('studio-interface-modal');
+            const dockInterfaceBtn = document.getElementById('dock-interface-btn');
+
+            function openStudioModal(paneId = 'pane-learn') {
+                closeKineticDrawer();
+                studioModal.classList.remove('hidden');
+                switchStudioPane(paneId);
+                triggerSynapticCascade();
+            }
+
+            function closeStudioModal() {
+                studioModal.classList.add('hidden');
+            }
+
+            function switchStudioPane(paneId) {
+                document.querySelectorAll('.studio-pane').forEach(p => p.classList.add('hidden'));
+                document.getElementById(paneId).classList.remove('hidden');
+
+                const colSwitcher = document.getElementById('compact-column-switcher');
+                if (colSwitcher) {
+                    if (paneId === 'pane-learn') colSwitcher.classList.remove('invisible');
+                    else colSwitcher.classList.add('invisible');
+                }
+
+                document.querySelectorAll('.studio-pane-btn').forEach(btn => {
+                    const active = btn.dataset.studioPane === paneId;
+                    btn.className = active
+                        ? 'studio-pane-btn px-3.5 sm:px-4 py-1.5 rounded-full text-xs font-medium bg-sky-500/25 text-sky-200 border border-sky-400/30 transition-all'
+                        : 'studio-pane-btn px-3.5 sm:px-4 py-1.5 rounded-full text-xs font-medium text-slate-400 hover:text-white transition-all';
+                });
+            }
+
+            // Responsive Autolayout Sub-Column Switcher for Compact Windows (< 1024px)
+            function setCompactColumn(colKey) {
+                const map = { sources: 'col-sources', synthesis: 'col-synthesis', artifacts: 'col-artifacts' };
+                document.querySelectorAll('.studio-col').forEach(el => {
+                    el.classList.add('hidden');
+                    el.classList.remove('flex');
+                });
+                const activeEl = document.getElementById(map[colKey]);
+                if (activeEl) {
+                    activeEl.classList.remove('hidden');
+                    activeEl.classList.add('flex');
+                }
+                document.querySelectorAll('.compact-col-btn').forEach(btn => {
+                    const active = btn.dataset.col === colKey;
+                    btn.className = active
+                        ? 'compact-col-btn px-3 py-1 rounded-full text-[11px] font-mono bg-white/15 text-white transition-all'
+                        : 'compact-col-btn px-3 py-1 rounded-full text-[11px] font-mono text-slate-400 hover:text-white transition-all';
+                });
+            }
+
+            document.querySelectorAll('.compact-col-btn').forEach(btn => {
+                btn.addEventListener('click', () => setCompactColumn(btn.dataset.col));
+            });
+
+            dockInterfaceBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (studioModal.classList.contains('hidden')) openStudioModal('pane-learn');
+                else closeStudioModal();
+            });
+            document.getElementById('close-studio-btn').addEventListener('click', closeStudioModal);
+            document.querySelectorAll('.studio-pane-btn').forEach(btn => {
+                btn.addEventListener('click', () => switchStudioPane(btn.dataset.studioPane));
+            });
+
+            // --- NotebookLM Sources & Studio State ---
+            let notebookSources = [
+                {
+                    id: 'src1',
+                    title: 'mindcorpus-whitepaper-MC-W01.pdf',
+                    type: 'PDF · 39p',
+                    active: true,
+                    content: 'MindCorpus keeps a person’s working record whole, dated, and encrypted in custody. Self-driving laboratories license checked directions without copying the record, preventing model collapse and paying royalties when directions hold.'
+                },
+                {
+                    id: 'src2',
+                    title: 'nephron-architecture-README.md',
+                    type: 'DOC',
+                    active: true,
+                    content: 'Nephron combines a 3D MindCorpus Glitter Brain, Cynapse & Ollama dual AI backends, Perplexica-style web search, offline pocket-tts voice synthesis, desktop pets, CUA swarm cursors, and parametric CAD.'
+                }
+            ];
+
+            let studioArtifacts = {
+                audioScript: [
+                    { speaker: 'Host A', line: 'Welcome back to the deep dive. Today we are looking at why self-driving labs are bottlenecked not by robotics, but by human directions.' },
+                    { speaker: 'Host B', line: 'Exactly—when models train on their own outputs, rare insights vanish. Keeping dated human records in custody preserves the spark.' }
+                ],
+                mindmap: [
+                    'Human Substrate (20W biological thought)',
+                    '  ├─ Sealed Custody Vault (Split 3-way keys)',
+                    '  ├─ Self-Driving Lab Seats (Checked directions only)',
+                    '  └─ Active Recall & Spaced Dendrites'
+                ],
+                slides: [
+                    'Slide 1: The Ideation-Execution Gap — Testing is cheap, knowing what to test is scarce.',
+                    'Slide 2: Custody vs. Copies — Why records must never leave encryption.',
+                    'Slide 3: Active Study Loop — Distilling PDFs into 3D cortical memory stars.'
+                ],
+                flashcards: [
+                    { front: 'Why does MindCorpus keep records in custody instead of selling copies?', back: 'A copy sold once can be resold or trained on forever, erasing attribution. Custody lets labs extract checked directions while preserving the dated record.' },
+                    { front: 'How much power does a human brain use compared to training GPT-3?', back: 'A human brain runs on ~20 watts (~14 MWh over 80 years), whereas training GPT-3 used ~1,287 MWh (about 92 human lifetimes).' },
+                    { front: 'What is Model Collapse?', back: 'When AI models recursively train on machine-generated text, rare insights disappear and output diversity narrows with each generation.' }
+                ],
+                quiz: [
+                    {
+                        question: 'What happens when AI models recursively train on machine-generated text?',
+                        options: ['Model collapse: rare cases vanish and output narrows', 'Infinite novelty emergence', 'Zero energy inference'],
+                        answerIndex: 0
+                    },
+                    {
+                        question: 'Where are distilled PDF concepts stored in Nephron?',
+                        options: ['Discarded after chat closes', 'Planted as clickable Dendrite nodes inside the 3D brain', 'Sent to public ad networks'],
+                        answerIndex: 1
+                    }
+                ]
+            };
+
+            let currentCardIdx = 0;
+            let currentQuizIdx = 0;
+            let quizScore = 0;
+
+            function renderNotebookSources() {
+                const list = document.getElementById('notebook-sources-list');
+                list.innerHTML = '';
+                let activeCount = 0;
+                notebookSources.forEach(src => {
+                    if (src.active) activeCount++;
+                    const row = document.createElement('div');
+                    row.className = `p-2.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${src.active ? 'bg-sky-500/10 border-sky-400/30' : 'bg-white/[0.02] border-white/5 opacity-60'}`;
+                    row.innerHTML = `
+                        <div class="truncate">
+                            <div class="text-[11px] font-medium text-slate-200 truncate">${src.title}</div>
+                            <div class="text-[9px] font-mono text-slate-400">${src.type}</div>
+                        </div>
+                        <span class="w-4 h-4 rounded-md flex items-center justify-center text-[10px] shrink-0 ${src.active ? 'bg-sky-400 text-slate-950 font-bold' : 'border border-white/25 text-transparent'}">✓</span>
+                    `;
+                    row.addEventListener('click', () => {
+                        src.active = !src.active;
+                        renderNotebookSources();
+                    });
+                    list.appendChild(row);
+                });
+                document.getElementById('active-sources-count').textContent = `${activeCount} active`;
+                document.getElementById('notebook-source-pill').textContent = `${activeCount} source${activeCount === 1 ? '' : 's'}`;
+            }
+
+            function showStudioStage(stageId) {
+                ['stage-empty', 'stage-flashcards', 'stage-quiz', 'stage-audio', 'stage-doc'].forEach(id => {
+                    document.getElementById(id).classList.add('hidden');
+                });
+                document.getElementById(stageId).classList.remove('hidden');
+            }
+
+            function renderFlashcard() {
+                const card = studioArtifacts.flashcards[currentCardIdx] || { front: 'No cards yet', back: '' };
+                document.getElementById('flashcard-inner').classList.remove('is-flipped');
+                document.getElementById('fc-front-text').textContent = card.front;
+                document.getElementById('fc-back-text').textContent = card.back;
+                document.getElementById('fc-counter').textContent = `${currentCardIdx + 1} / ${studioArtifacts.flashcards.length}`;
+            }
+
+            document.getElementById('flashcard-container').addEventListener('click', () => {
+                document.getElementById('flashcard-inner').classList.toggle('is-flipped');
+            });
+            document.getElementById('fc-prev-btn').addEventListener('click', () => {
+                currentCardIdx = (currentCardIdx - 1 + studioArtifacts.flashcards.length) % studioArtifacts.flashcards.length;
+                renderFlashcard();
+            });
+            document.getElementById('fc-next-btn').addEventListener('click', () => {
+                currentCardIdx = (currentCardIdx + 1) % studioArtifacts.flashcards.length;
+                renderFlashcard();
+            });
+
+            function renderQuizQuestion() {
+                const q = studioArtifacts.quiz[currentQuizIdx];
+                if (!q) return;
+                document.getElementById('quiz-progress-label').textContent = `${currentQuizIdx + 1} / ${studioArtifacts.quiz.length}`;
+                document.getElementById('quiz-score-label').textContent = `score: ${quizScore}`;
+                document.getElementById('quiz-question-text').textContent = q.question;
+                document.getElementById('quiz-feedback-text').textContent = 'Pick an option';
+
+                const optContainer = document.getElementById('quiz-options-list');
+                optContainer.innerHTML = '';
+                q.options.forEach((optText, idx) => {
+                    const btn = document.createElement('button');
+                    btn.className = 'w-full text-left px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/10 border border-white/10 text-[11px] text-slate-200 transition-all';
+                    btn.textContent = optText;
+                    btn.addEventListener('click', () => {
+                        if (idx === q.answerIndex) {
+                            quizScore++;
+                            awardRpgXp(15, 5, 'Quiz mastery +15 XP');
+                            btn.className = 'w-full text-left px-3 py-2 rounded-xl bg-emerald-500/25 border border-emerald-400/50 text-[11px] text-emerald-100';
+                            document.getElementById('quiz-feedback-text').textContent = '✓ +15 XP!';
+                            triggerSynapticCascade();
+                        } else {
+                            btn.className = 'w-full text-left px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-400/45 text-[11px] text-rose-200';
+                            document.getElementById('quiz-feedback-text').textContent = `✕ ${q.options[q.answerIndex]}`;
+                        }
+                        document.getElementById('quiz-score-label').textContent = `score: ${quizScore}`;
+                    });
+                    optContainer.appendChild(btn);
+                });
+            }
+
+            document.getElementById('quiz-next-btn').addEventListener('click', () => {
+                currentQuizIdx = (currentQuizIdx + 1) % studioArtifacts.quiz.length;
+                renderQuizQuestion();
+            });
+
+            function renderAudioOverviewStage() {
+                const box = document.getElementById('audio-script-box');
+                box.innerHTML = '';
+                studioArtifacts.audioScript.forEach(turn => {
+                    const p = document.createElement('div');
+                    p.className = 'p-2 rounded-xl bg-white/[0.04] border border-white/5';
+                    p.innerHTML = `<span class="font-mono text-[10px] text-sky-300">${turn.speaker}:</span> <span class="text-slate-200">${turn.line}</span>`;
+                    box.appendChild(p);
+                });
+            }
+
+            function renderDocStage(title, lines) {
+                document.getElementById('stage-doc-title').textContent = title;
+                const box = document.getElementById('stage-doc-content');
+                box.innerHTML = '';
+                lines.forEach(line => {
+                    const div = document.createElement('div');
+                    div.className = 'p-2 rounded-xl bg-white/[0.04] border border-white/5';
+                    div.textContent = line;
+                    box.appendChild(div);
+                });
+            }
+
+            // PDF / Document Drop & File Reader
+            let uploadedDocBase64 = null;
+            let uploadedDocMime = null;
+            let uploadedDocName = null;
+
+            const pdfDropZone = document.getElementById('pdf-drop-zone');
+            const pdfFileInput = document.getElementById('pdf-file-input');
+
+            function handleFileSelection(file) {
+                if (!file) return;
+                uploadedDocName = file.name;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const dataUrl = reader.result;
+                    uploadedDocBase64 = dataUrl.split(',')[1];
+                    uploadedDocMime = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'text/plain');
+                    notebookSources.unshift({
+                        id: 'src_' + Date.now(),
+                        title: file.name,
+                        type: file.name.endsWith('.pdf') ? 'PDF' : 'DOC',
+                        active: true,
+                        content: `Uploaded source: ${file.name}`
+                    });
+                    renderNotebookSources();
+                    synthesizeNotebookFromSources(`Analyze uploaded source "${file.name}" and generate complete study artifacts + brain memory nodes.`);
+                };
+                reader.readAsDataURL(file);
+            }
+
+            pdfFileInput.addEventListener('change', (e) => handleFileSelection(e.target.files[0]));
+            pdfDropZone.addEventListener('dragover', (e) => { e.preventDefault(); pdfDropZone.classList.add('border-sky-300', 'bg-sky-500/20'); });
+            pdfDropZone.addEventListener('dragleave', () => { pdfDropZone.classList.remove('border-sky-300', 'bg-sky-500/20'); });
+            pdfDropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                pdfDropZone.classList.remove('border-sky-300', 'bg-sky-500/20');
+                if (e.dataTransfer.files.length > 0) handleFileSelection(e.dataTransfer.files[0]);
+            });
+
+            document.getElementById('quick-note-btn').addEventListener('click', () => {
+                const input = document.getElementById('notebook-chat-input');
+                input.focus();
+                input.placeholder = 'Type a note to save as a source & brain node...';
+            });
+
+            // Gemini API Structured NotebookLM Synthesis + Exponential Backoff
+            async function fetchWithBackoff(url, options, retries = 3) {
+                let delay = 1000;
+                for (let i = 0; i <= retries; i++) {
+                    const res = await fetch(url, options);
+                    if (res.ok || i === retries) return res;
+                    await new Promise(r => setTimeout(r, delay));
+                    delay *= 2;
+                }
+            }
+
+            function appendNotebookMessage(role, text, citations = []) {
+                const feed = document.getElementById('notebook-chat-feed');
+                const card = document.createElement('div');
+                card.className = role === 'user'
+                    ? 'ml-auto max-w-[82%] rounded-2xl bg-sky-500/20 border border-sky-400/30 px-3.5 py-2.5 text-xs text-white selectable-text'
+                    : 'mr-auto max-w-[95%] rounded-2xl bg-white/[0.04] border border-white/10 px-4 py-3 text-xs text-slate-200 leading-relaxed space-y-2 selectable-text';
+
+                if (role === 'user') {
+                    card.textContent = text;
+                } else {
+                    const body = document.createElement('div');
+                    body.textContent = text;
+                    card.appendChild(body);
+                    if (citations.length > 0) {
+                        const citRow = document.createElement('div');
+                        citRow.className = 'flex flex-wrap gap-1.5 pt-1';
+                        citations.forEach((c, idx) => {
+                            const pill = document.createElement('span');
+                            pill.className = 'px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-[10px] font-mono text-sky-300';
+                            pill.textContent = `[${idx + 1}] ${c}`;
+                            citRow.appendChild(pill);
+                        });
+                        card.appendChild(citRow);
+                    }
+                }
+                feed.appendChild(card);
+                const scroller = document.getElementById('notebook-center-scroll');
+                scroller.scrollTop = scroller.scrollHeight;
+            }
+
+            async function synthesizeNotebookFromSources(instruction, targetArtifact = null) {
+                const genStatus = document.getElementById('studio-gen-status');
+                genStatus.textContent = 'generating...';
+                setBubbleExpression('thinking');
+
+                const activeSources = notebookSources.filter(s => s.active);
+                const contextBlock = activeSources.map((s, i) => `[${i + 1}] ${s.title}: ${s.content}`).join('\n');
+
+                try {
+                    const apiKey = "";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+                    const parts = [{
+                        text: `You are Nephron's NotebookLM-style DeepTutor engine. Ground your response strictly in the active sources below (and attached document if provided). Generate a concise grounded answer, 2 atomic brain memory nodes, 3 flashcards, 2 multiple-choice quiz questions, a 2-turn Audio Overview podcast script between Host A and Host B, a 4-line Mind Map outline, and 3 presentation Slide summaries.\n\nActive Sources:\n${contextBlock}\n\nTask: ${instruction}`
+                    }];
+
+                    if (uploadedDocBase64 && uploadedDocMime) {
+                        parts.push({ inlineData: { mimeType: uploadedDocMime, data: uploadedDocBase64 } });
+                        uploadedDocBase64 = null;
+                    }
+
+                    const payload = {
+                        contents: [{ role: 'user', parts }],
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            responseSchema: {
+                                type: "OBJECT",
+                                properties: {
+                                    notebookTitle: { type: "STRING" },
+                                    answer: { type: "STRING" },
+                                    brainNodes: {
+                                        type: "ARRAY",
+                                        items: {
+                                            type: "OBJECT",
+                                            properties: {
+                                                title: { type: "STRING" },
+                                                body: { type: "STRING" },
+                                                lobe: { type: "STRING" }
+                                            },
+                                            required: ["title", "body", "lobe"]
+                                        }
+                                    },
+                                    flashcards: {
+                                        type: "ARRAY",
+                                        items: {
+                                            type: "OBJECT",
+                                            properties: {
+                                                front: { type: "STRING" },
+                                                back: { type: "STRING" }
+                                            },
+                                            required: ["front", "back"]
+                                        }
+                                    },
+                                    quiz: {
+                                        type: "ARRAY",
+                                        items: {
+                                            type: "OBJECT",
+                                            properties: {
+                                                question: { type: "STRING" },
+                                                options: { type: "ARRAY", items: { type: "STRING" } },
+                                                answerIndex: { type: "INTEGER" }
+                                            },
+                                            required: ["question", "options", "answerIndex"]
+                                        }
+                                    },
+                                    audioScript: {
+                                        type: "ARRAY",
+                                        items: {
+                                            type: "OBJECT",
+                                            properties: {
+                                                speaker: { type: "STRING" },
+                                                line: { type: "STRING" }
+                                            },
+                                            required: ["speaker", "line"]
+                                        }
+                                    },
+                                    mindmap: { type: "ARRAY", items: { type: "STRING" } },
+                                    slides: { type: "ARRAY", items: { type: "STRING" } }
+                                },
+                                required: ["notebookTitle", "answer", "brainNodes", "flashcards", "quiz", "audioScript", "mindmap", "slides"]
+                            }
+                        }
+                    };
+
+                    const response = await fetchWithBackoff(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    const result = await response.json();
+                    const rawText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (rawText) {
+                        const parsed = JSON.parse(rawText);
+                        document.getElementById('notebook-main-title').textContent = parsed.notebookTitle;
+                        appendNotebookMessage('assistant', parsed.answer, activeSources.map(s => s.title));
+
+                        studioArtifacts = {
+                            audioScript: parsed.audioScript || studioArtifacts.audioScript,
+                            mindmap: parsed.mindmap || studioArtifacts.mindmap,
+                            slides: parsed.slides || studioArtifacts.slides,
+                            flashcards: parsed.flashcards || studioArtifacts.flashcards,
+                            quiz: parsed.quiz || studioArtifacts.quiz
+                        };
+
+                        const validLobes = ['frontal', 'parietal', 'temporal', 'occipital'];
+                        (parsed.brainNodes || []).forEach(bn => {
+                            const safeLobe = validLobes.includes((bn.lobe || '').toLowerCase()) ? bn.lobe.toLowerCase() : 'frontal';
+                            plantBrainMemoryNode(bn.title, bn.body, safeLobe, true);
+                        });
+
+                        awardRpgXp(20, 8, 'Source synthesized +20 XP');
+                    } else {
+                        throw new Error('Fallback');
+                    }
+                } catch (_) {
+                    appendNotebookMessage('assistant', `Synthesized locally across ${activeSources.length} active source(s) via ${state.backend} (${state.model}).`, activeSources.map(s => s.title));
+                } finally {
+                    genStatus.textContent = 'ready';
+                    setBubbleExpression('idle');
+                    if (targetArtifact) openStudioArtifact(targetArtifact);
+                }
+            }
+
+            function openStudioArtifact(type) {
+                if (window.innerWidth < 1024) setCompactColumn('artifacts');
+                if (type === 'flashcards') {
+                    currentCardIdx = 0;
+                    renderFlashcard();
+                    showStudioStage('stage-flashcards');
+                } else if (type === 'quiz') {
+                    currentQuizIdx = 0;
+                    quizScore = 0;
+                    renderQuizQuestion();
+                    showStudioStage('stage-quiz');
+                } else if (type === 'audio') {
+                    renderAudioOverviewStage();
+                    showStudioStage('stage-audio');
+                } else if (type === 'mindmap') {
+                    renderDocStage('Neural Mind Map', studioArtifacts.mindmap);
+                    showStudioStage('stage-doc');
+                } else if (type === 'slides') {
+                    renderDocStage('Synthesis Slide Deck', studioArtifacts.slides);
+                    showStudioStage('stage-doc');
+                } else if (type === 'report') {
+                    renderDocStage('Executive Briefing Doc', [
+                        document.getElementById('notebook-main-title').textContent,
+                        ...studioArtifacts.slides
+                    ]);
+                    showStudioStage('stage-doc');
+                }
+            }
+
+            document.querySelectorAll('.studio-tile-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const art = btn.dataset.artifact;
+                    openStudioArtifact(art);
+                    synthesizeNotebookFromSources(`Generate a fresh ${art} grounded in the active sources.`, art);
+                });
+            });
+
+            document.getElementById('notebook-chat-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const input = document.getElementById('notebook-chat-input');
+                const val = input.value.trim();
+                if (!val) return;
+                input.value = '';
+                appendNotebookMessage('user', val);
+                synthesizeNotebookFromSources(val);
+            });
+
+            document.querySelectorAll('.notebook-starter-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const prompt = btn.dataset.starter;
+                    appendNotebookMessage('user', prompt);
+                    synthesizeNotebookFromSources(prompt);
+                });
+            });
+
+            document.getElementById('source-web-search-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const input = document.getElementById('source-web-input');
+                const q = input.value.trim();
+                if (!q) return;
+                input.value = '';
+                notebookSources.unshift({
+                    id: 'web_' + Date.now(),
+                    title: `Web: ${q}`,
+                    type: 'SEARCH [1]',
+                    active: true,
+                    content: `Grounded web discovery for "${q}" via Nephron search bridge.`
+                });
+                renderNotebookSources();
+                synthesizeNotebookFromSources(`Research "${q}" and add findings to our notebook.`);
+            });
+
+            // Gemini Multi-Speaker Audio Overview & Single-Speaker TTS
+            function base64ToArrayBuffer(base64) {
+                const binaryString = atob(base64);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+                return bytes.buffer;
+            }
+
+            function pcmToWav(pcm16, sampleRate) {
+                const buffer = new ArrayBuffer(44 + pcm16.length * 2);
+                const view = new DataView(buffer);
+                const writeString = (offset, str) => {
+                    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+                };
+                writeString(0, 'RIFF');
+                view.setUint32(4, 36 + pcm16.length * 2, true);
+                writeString(8, 'WAVE');
+                writeString(12, 'fmt ');
+                view.setUint32(16, 16, true);
+                view.setUint16(20, 1, true);
+                view.setUint16(22, 1, true);
+                view.setUint32(24, sampleRate, true);
+                view.setUint32(28, sampleRate * 2, true);
+                view.setUint16(32, 2, true);
+                view.setUint16(34, 16, true);
+                writeString(36, 'data');
+                view.setUint32(40, pcm16.length * 2, true);
+                for (let i = 0; i < pcm16.length; i++) view.setInt16(44 + i * 2, pcm16[i], true);
+                return new Blob([view], { type: 'audio/wav' });
+            }
+
+            async function playMultiSpeakerAudioOverview() {
+                setBubbleExpression('speaking');
+                const scriptText = studioArtifacts.audioScript.map(t => `${t.speaker}: ${t.line}`).join('\n');
+                try {
+                    const apiKey = "";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+                    const payload = {
+                        contents: [{ parts: [{ text: `TTS the following engaging podcast conversation between Host A and Host B:\n${scriptText}` }] }],
+                        generationConfig: {
+                            responseModalities: ["AUDIO"],
+                            speechConfig: {
+                                multiSpeakerVoiceConfig: {
+                                    speakerVoiceConfigs: [
+                                        { speaker: "Host A", voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } } },
+                                        { speaker: "Host B", voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } } }
+                                    ]
+                                }
+                            }
+                        },
+                        model: "gemini-2.5-flash-preview-tts"
+                    };
+                    const res = await fetchWithBackoff(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    const part = data?.candidates?.[0]?.content?.parts?.[0];
+                    const audioData = part?.inlineData?.data;
+                    const mimeType = part?.inlineData?.mimeType;
+                    if (audioData && mimeType && mimeType.startsWith('audio/')) {
+                        const rateMatch = mimeType.match(/rate=(\d+)/);
+                        const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+                        const pcm16 = new Int16Array(base64ToArrayBuffer(audioData));
+                        const wavBlob = pcmToWav(pcm16, sampleRate);
+                        new Audio(URL.createObjectURL(wavBlob)).play();
+                    }
+                } catch (_) {}
+            }
+
+            async function speakWithGeminiTTS(text) {
+                if (!text) return;
+                setBubbleExpression('speaking');
+                try {
+                    const apiKey = "";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+                    const voiceName = document.getElementById('studio-voice-select').value || 'Kore';
+                    const payload = {
+                        contents: [{ parts: [{ text: `Read clearly and calmly: ${text.slice(0, 320)}` }] }],
+                        generationConfig: {
+                            responseModalities: ["AUDIO"],
+                            speechConfig: {
+                                voiceConfig: { prebuiltVoiceConfig: { voiceName } }
+                            }
+                        },
+                        model: "gemini-2.5-flash-preview-tts"
+                    };
+                    const res = await fetchWithBackoff(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    const part = data?.candidates?.[0]?.content?.parts?.[0];
+                    const audioData = part?.inlineData?.data;
+                    const mimeType = part?.inlineData?.mimeType;
+                    if (audioData && mimeType && mimeType.startsWith('audio/')) {
+                        const rateMatch = mimeType.match(/rate=(\d+)/);
+                        const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+                        const pcm16 = new Int16Array(base64ToArrayBuffer(audioData));
+                        const wavBlob = pcmToWav(pcm16, sampleRate);
+                        new Audio(URL.createObjectURL(wavBlob)).play();
+                    }
+                } catch (_) {}
+            }
+
+            document.getElementById('play-audio-overview-btn').addEventListener('click', playMultiSpeakerAudioOverview);
+            document.getElementById('test-voice-btn').addEventListener('click', () => {
+                speakWithGeminiTTS('Nephron cognitive study engine and voice pipeline online.');
+            });
+
+            // =========================================================================
+            // HABITICA-INSPIRED RPG HABIT & FOCUS QUEST ENGINE
+            // =========================================================================
+            const rpg = {
+                level: 7,
+                hp: 48,
+                maxHp: 50,
+                xp: 340,
+                maxXp: 500,
+                mp: 85,
+                maxMp: 100,
+                gold: 142,
+                habits: [
+                    { id: 'hb1', title: 'Synthesize a new paper or note', pos: 6, neg: 0, positive: true, negative: false },
+                    { id: 'hb2', title: 'Deep focus without context switching', pos: 11, neg: 2, positive: true, negative: true },
+                    { id: 'hb3', title: 'Passive doomscrolling', pos: 0, neg: 3, positive: false, negative: true }
+                ],
+                dailies: [
+                    { id: 'dl1', title: 'Review 5 Cortex Flashcards', streak: 14, done: true },
+                    { id: 'dl2', title: '25m Deep Study Quest', streak: 9, done: false },
+                    { id: 'dl3', title: 'Evening MindCorpus Journal Entry', streak: 21, done: false }
+                ],
+                todos: [
+                    { id: 'td1', title: 'Master MindCorpus White Paper MC-W01', difficulty: 'Hard', done: false },
+                    { id: 'td2', title: 'Verify ARM64 release build on Orange Pi', difficulty: 'Medium', done: false }
+                ]
+            };
+
+            function updateRpgHud(toastMsg = '') {
+                while (rpg.xp >= rpg.maxXp) {
+                    rpg.xp -= rpg.maxXp;
+                    rpg.level++;
+                    rpg.hp = rpg.maxHp;
+                    rpg.mp = rpg.maxMp;
+                    toastMsg = `★ LEVEL UP! Lv ${rpg.level}`;
+                    triggerSynapticCascade();
+                }
+                document.getElementById('rpg-level-badge').textContent = `Lv ${rpg.level}`;
+                document.getElementById('rpg-hp-text').textContent = `${rpg.hp}/${rpg.maxHp}`;
+                document.getElementById('rpg-hp-bar').style.width = `${(rpg.hp / rpg.maxHp) * 100}%`;
+                document.getElementById('rpg-xp-text').textContent = `${rpg.xp}/${rpg.maxXp}`;
+                document.getElementById('rpg-xp-bar').style.width = `${(rpg.xp / rpg.maxXp) * 100}%`;
+                document.getElementById('rpg-mp-text').textContent = `${rpg.mp}/${rpg.maxMp}`;
+                document.getElementById('rpg-mp-bar').style.width = `${(rpg.mp / rpg.maxMp) * 100}%`;
+                document.getElementById('rpg-gold-text').textContent = `🪙 ${rpg.gold}`;
+                if (toastMsg) {
+                    const t = document.getElementById('rpg-toast');
+                    t.textContent = toastMsg;
+                    setTimeout(() => { if (t.textContent === toastMsg) t.textContent = ''; }, 2400);
+                }
+            }
+
+            function awardRpgXp(xpGain, goldGain, msg) {
+                rpg.xp += xpGain;
+                rpg.gold += goldGain;
+                rpg.mp = Math.min(rpg.maxMp, rpg.mp + 4);
+                updateRpgHud(msg);
+            }
+
+            function damageRpgHp(dmg, msg) {
+                rpg.hp = Math.max(5, rpg.hp - dmg);
+                updateRpgHud(msg);
+            }
+
+            function renderHabiticaBoard() {
+                // 1. Habits (+/-)
+                const hList = document.getElementById('rpg-habits-list');
+                hList.innerHTML = '';
+                rpg.habits.forEach(h => {
+                    const card = document.createElement('div');
+                    card.className = 'flex items-center justify-between gap-2 p-2 rounded-xl bg-black/30 border border-white/10';
+                    card.innerHTML = `
+                        <button class="hb-plus w-7 h-7 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/35 text-emerald-300 font-bold text-xs shrink-0">+</button>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs text-slate-200 truncate">${h.title}</div>
+                            <div class="text-[9px] font-mono text-slate-400">+${h.pos} | −${h.neg}</div>
+                        </div>
+                        <button class="hb-minus w-7 h-7 rounded-lg bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 font-bold text-xs shrink-0">−</button>
+                    `;
+                    card.querySelector('.hb-plus').addEventListener('click', () => {
+                        h.pos++;
+                        awardRpgXp(12, 3, '+12 XP · +3 Gold');
+                        triggerSynapticCascade();
+                        renderHabiticaBoard();
+                    });
+                    card.querySelector('.hb-minus').addEventListener('click', () => {
+                        h.neg++;
+                        damageRpgHp(5, '−5 HP');
+                        renderHabiticaBoard();
+                    });
+                    hList.appendChild(card);
+                });
+
+                // 2. Dailies
+                const dList = document.getElementById('rpg-dailies-list');
+                dList.innerHTML = '';
+                rpg.dailies.forEach(d => {
+                    const card = document.createElement('div');
+                    card.className = `flex items-center justify-between gap-2.5 p-2.5 rounded-xl border transition-all cursor-pointer ${d.done ? 'bg-white/[0.02] border-white/5 opacity-60' : 'bg-sky-500/10 border-sky-400/25 hover:bg-sky-500/15'}`;
+                    card.innerHTML = `
+                        <div class="flex items-center gap-2.5 min-w-0">
+                            <span class="w-4 h-4 rounded flex items-center justify-center text-[10px] shrink-0 ${d.done ? 'bg-sky-400 text-slate-950 font-bold' : 'border border-sky-300/40 text-transparent'}">✓</span>
+                            <span class="text-xs truncate ${d.done ? 'line-through text-slate-400' : 'text-slate-100'}">${d.title}</span>
+                        </div>
+                        <span class="text-[10px] font-mono text-amber-300 shrink-0">🔥${d.streak}</span>
+                    `;
+                    card.addEventListener('click', () => {
+                        d.done = !d.done;
+                        if (d.done) {
+                            d.streak++;
+                            awardRpgXp(20, 6, '+20 XP · Streak!');
+                            triggerSynapticCascade();
+                        } else {
+                            d.streak = Math.max(0, d.streak - 1);
+                        }
+                        renderHabiticaBoard();
+                    });
+                    dList.appendChild(card);
+                });
+
+                // 3. To-Dos
+                const tList = document.getElementById('rpg-todos-list');
+                tList.innerHTML = '';
+                rpg.todos.forEach((td, idx) => {
+                    const card = document.createElement('div');
+                    card.className = 'flex items-center justify-between gap-2.5 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-400/25 hover:bg-emerald-500/15 transition-all cursor-pointer';
+                    card.innerHTML = `
+                        <div class="flex items-center gap-2.5 min-w-0">
+                            <span class="w-4 h-4 rounded border border-emerald-300/40 shrink-0"></span>
+                            <span class="text-xs text-slate-100 truncate">${td.title}</span>
+                        </div>
+                        <span class="text-[9px] font-mono text-emerald-300 shrink-0">${td.difficulty}</span>
+                    `;
+                    card.addEventListener('click', () => {
+                        rpg.todos.splice(idx, 1);
+                        awardRpgXp(35, 12, 'Quest Complete! +35 XP');
+                        triggerSynapticCascade();
+                        renderHabiticaBoard();
+                    });
+                    tList.appendChild(card);
+                });
+            }
+
+            document.getElementById('add-habit-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const inp = document.getElementById('new-habit-input');
+                if (!inp.value.trim()) return;
+                rpg.habits.unshift({ id: 'hb_' + Date.now(), title: inp.value.trim(), pos: 0, neg: 0 });
+                inp.value = '';
+                renderHabiticaBoard();
+            });
+
+            document.getElementById('add-daily-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const inp = document.getElementById('new-daily-input');
+                if (!inp.value.trim()) return;
+                rpg.dailies.unshift({ id: 'dl_' + Date.now(), title: inp.value.trim(), streak: 1, done: false });
+                inp.value = '';
+                renderHabiticaBoard();
+            });
+
+            document.getElementById('add-todo-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const inp = document.getElementById('new-todo-input');
+                if (!inp.value.trim()) return;
+                rpg.todos.unshift({ id: 'td_' + Date.now(), title: inp.value.trim(), difficulty: 'Medium', done: false });
+                inp.value = '';
+                renderHabiticaBoard();
+            });
+
+            let focusSeconds = 25 * 60;
+            let focusInterval = null;
+            const focusDisplay = document.getElementById('focus-timer-display');
+            const focusStartBtn = document.getElementById('focus-start-btn');
+
+            function updateFocusClock() {
+                const m = String(Math.floor(focusSeconds / 60)).padStart(2, '0');
+                const s = String(focusSeconds % 60).padStart(2, '0');
+                focusDisplay.textContent = `${m}:${s}`;
+            }
+
+            focusStartBtn.addEventListener('click', () => {
+                if (focusInterval) {
+                    clearInterval(focusInterval);
+                    focusInterval = null;
+                    focusStartBtn.textContent = 'resume';
+                    setCognitiveState('idle');
+                } else {
+                    focusStartBtn.textContent = 'pause';
+                    setCognitiveState('thinking');
+                    focusInterval = setInterval(() => {
+                        if (focusSeconds > 0) {
+                            focusSeconds--;
+                            updateFocusClock();
+                        } else {
+                            clearInterval(focusInterval);
+                            focusInterval = null;
+                            focusStartBtn.textContent = 'victory';
+                            awardRpgXp(50, 20, 'Boss Defeated! +50 XP');
+                            setCognitiveState('responding');
+                        }
+                    }, 1000);
+                }
+            });
+
+            document.getElementById('focus-reset-btn').addEventListener('click', () => {
+                clearInterval(focusInterval);
+                focusInterval = null;
+                focusSeconds = 25 * 60;
+                updateFocusClock();
+                focusStartBtn.textContent = 'battle';
+                setCognitiveState('idle');
+            });
+
+            renderNotebookSources();
+            renderHabiticaBoard();
+            updateRpgHud();
+
+            // --- Mini 3D CAD Stage ---
+            let cadRenderer = null, cadMesh = null;
+            function initMiniCadPreview(shape) {
+                const mount = document.getElementById('mini-cad-stage');
+                if (!cadRenderer) {
+                    const s = new THREE.Scene();
+                    const c = new THREE.PerspectiveCamera(40, mount.clientWidth / mount.clientHeight, 0.1, 20);
+                    c.position.set(2.1, 1.6, 2.4);
+                    c.lookAt(0, 0, 0);
+                    cadRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                    cadRenderer.setSize(mount.clientWidth, mount.clientHeight);
+                    mount.appendChild(cadRenderer.domElement);
+
+                    cadMesh = new THREE.Group();
+                    s.add(cadMesh);
+
+                    (function loopCad() {
+                        requestAnimationFrame(loopCad);
+                        if (!document.getElementById('tab-cad').classList.contains('hidden')) {
+                            cadMesh.rotation.y += 0.015;
+                            cadRenderer.render(s, c);
+                        }
+                    })();
+                }
+
+                while (cadMesh.children.length > 0) cadMesh.remove(cadMesh.children[0]);
+                let geo;
+                if (shape === 'cylinder') geo = new THREE.CylinderGeometry(0.6, 0.6, 1.1, 24);
+                else if (shape === 'torus') geo = new THREE.TorusGeometry(0.65, 0.22, 16, 32);
+                else geo = new THREE.BoxGeometry(1.3, 0.55, 0.9);
+
+                cadMesh.add(
+                    new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: 0.2 })),
+                    new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x34d399, wireframe: true }))
+                );
+            }
+            document.querySelectorAll('.cad-prim-btn').forEach(b => b.addEventListener('click', () => initMiniCadPreview(b.dataset.prim)));
+
+            // --- Pets & Swarm ---
+            const petOrb = document.getElementById('floating-pet-orb');
+            document.querySelectorAll('.spawn-pet-btn').forEach(b => {
+                b.addEventListener('click', () => {
+                    document.getElementById('pet-emoji').textContent = b.dataset.emoji;
+                    document.getElementById('pet-thought').textContent = `${state.backend} · ok`;
+                    petOrb.classList.remove('hidden');
+                    closeKineticDrawer();
+                });
+            });
+            document.getElementById('pet-dismiss').addEventListener('click', () => petOrb.classList.add('hidden'));
+
+            document.getElementById('swarm-launch-btn').addEventListener('click', () => {
+                closeKineticDrawer();
+                const layer = document.getElementById('swarm-layer');
+                ['#38bdf8', '#c084fc', '#34d399'].forEach((col, i) => {
+                    const el = document.createElement('div');
+                    el.className = 'absolute transition-all duration-1000 ease-out';
+                    el.style.left = '50%';
+                    el.style.top = '50%';
+                    el.innerHTML = `<svg class="w-4 h-4" style="color:${col}" fill="currentColor" viewBox="0 0 24 24"><path d="M4 3l16 8-7 2-2 7z"/></svg>`;
+                    layer.appendChild(el);
+                    requestAnimationFrame(() => {
+                        el.style.left = (25 + i * 24) + '%';
+                        el.style.top = (30 + (i % 2) * 28) + '%';
+                    });
+                    setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 400); }, 2000);
+                });
+                triggerSynapticCascade();
+            });
+
+            // --- Cortex Controls ---
+            document.getElementById('burst-btn').addEventListener('click', () => triggerSynapticCascade());
+            document.getElementById('spin-toggle-btn').addEventListener('click', () => { state.autoRotate = !state.autoRotate; });
+            document.getElementById('pulse-range').addEventListener('input', (e) => { state.pulseSpeed = parseFloat(e.target.value); });
+            document.getElementById('glitter-range').addEventListener('input', (e) => {
+                state.glitterIntensity = parseFloat(e.target.value);
+                nodeMaterial.uniforms.uGlitter.value = state.glitterIntensity;
+            });
+
+            document.getElementById('palette-cycle-btn').addEventListener('click', () => {
+                state.paletteIndex = (state.paletteIndex + 1) % palettes.length;
+                const colorAttr = nodeGeometry.getAttribute('aColor');
+                for (let i = 0; i < NODE_COUNT; i++) {
+                    const x = brainData.positions[i * 3];
+                    const y = brainData.positions[i * 3 + 1];
+                    const z = brainData.positions[i * 3 + 2];
+                    const c = computeNodeColor(x, y, z, brainData.isHubArr[i] === 1, state.paletteIndex);
+                    colorAttr.setXYZ(i, c.r, c.g, c.b);
+                }
+                colorAttr.needsUpdate = true;
+                recolorSynapses();
+            });
+
+            document.getElementById('snap-png-btn').addEventListener('click', () => {
+                renderer.render(scene, camera);
+                const link = document.createElement('a');
+                link.download = `nephron-${Date.now()}.png`;
+                link.href = renderer.domElement.toDataURL('image/png');
+                link.click();
+            });
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // --- Main Loop ---
+            const clock = new THREE.Clock();
+            function animate() {
+                requestAnimationFrame(animate);
+                const dt = Math.min(clock.getDelta(), 0.05);
+                const elapsed = clock.getElapsedTime();
+
+                // Smoothly interpolate cognitive activation & regional cortical scanning
+                cognitive.intensity += (cognitive.targetIntensity - cognitive.intensity) * 0.07;
+                cognitive.speedBoost += (cognitive.targetSpeedBoost - cognitive.speedBoost) * 0.07;
+
+                if (cognitive.phase === 'thinking') {
+                    // Sweeping cognitive focal points across prefrontal, parietal, and temporal hubs
+                    cognitive.focusCenter.set(
+                        Math.sin(elapsed * 2.4) * 0.95,
+                        0.35 + Math.cos(elapsed * 1.9) * 0.45,
+                        Math.cos(elapsed * 2.1) * 1.25
+                    );
+                    cognitive.secondaryFocus.set(
+                        -Math.cos(elapsed * 2.0) * 0.85,
+                        0.2 + Math.sin(elapsed * 2.6) * 0.4,
+                        -Math.sin(elapsed * 1.8) * 1.15
+                    );
+                    // Dynamic MindCorpus spectral shift while reasoning
+                    const dynColA = sampleMcSpectrum((Math.sin(elapsed * 1.4) + 1) * 0.5);
+                    const dynColB = sampleMcSpectrum((Math.cos(elapsed * 1.1) + 1) * 0.5);
+                    cognitive.focusColor.lerp(dynColA, 0.1);
+                    cognitive.secondaryColor.lerp(dynColB, 0.1);
+                } else if (cognitive.phase === 'responding') {
+                    // Rhythmic Broca/motor speech modulation
+                    cognitive.focusCenter.set(
+                        -0.75 + Math.sin(elapsed * 4.5) * 0.25,
+                        0.22 + Math.cos(elapsed * 3.8) * 0.18,
+                        0.85
+                    );
+                }
+
+                nodeMaterial.uniforms.uTime.value = elapsed;
+                nodeMaterial.uniforms.uCogIntensity.value = cognitive.intensity;
+                nodeMaterial.uniforms.uCogFocusA.value.copy(cognitive.focusCenter);
+                nodeMaterial.uniforms.uCogColorA.value.copy(cognitive.focusColor);
+                nodeMaterial.uniforms.uCogFocusB.value.copy(cognitive.secondaryFocus);
+                nodeMaterial.uniforms.uCogColorB.value.copy(cognitive.secondaryColor);
+
+                synapseMaterial.uniforms.uCogIntensity.value = cognitive.intensity;
+                synapseMaterial.uniforms.uCogFocus.value.copy(cognitive.focusCenter);
+                synapseMaterial.uniforms.uCogColor.value.copy(cognitive.focusColor);
+
+                coreAuraMat.uniforms.uTime.value = elapsed;
+                coreAuraMat.uniforms.uActivity.value = cognitive.intensity;
+
+                if (dendritePointsObj) dendritePointsObj.material.uniforms.uTime.value = elapsed;
+
+                state.currentZoom += (state.targetZoom - state.currentZoom) * 0.08;
+                camera.position.set(0, 0.12, state.currentZoom);
+                camera.lookAt(0, 0, 0);
+
+                if (!state.isDragging) {
+                    state.userRotation.y += state.angularVelocity.y;
+                    state.userRotation.x = Math.max(-1.35, Math.min(1.35, state.userRotation.x + state.angularVelocity.x));
+                    state.angularVelocity.x *= 0.92;
+                    state.angularVelocity.y *= 0.92;
+                    if (state.autoRotate) state.userRotation.y += dt * (0.16 + cognitive.intensity * 0.14);
+                }
+
+                brainGroup.rotation.y += (state.userRotation.y - brainGroup.rotation.y) * 0.14;
+                brainGroup.rotation.x += (state.userRotation.x - brainGroup.rotation.x) * 0.14;
+                ambientDust.rotation.y = elapsed * 0.015;
+
+                const effectivePulseSpeed = state.pulseSpeed * cognitive.speedBoost;
+                const posAttr = synapseGeometry.getAttribute('position');
+                const alphaAttr = synapseGeometry.getAttribute('aAlpha');
+                const pulsePosAttr = pulseGeometry.getAttribute('position');
+                const pulseSizeAttr = pulseGeometry.getAttribute('aSize');
+                let lineVertexIdx = 0;
+
+                for (let i = 0; i < MAX_PATHWAYS; i++) {
+                    const p = pathways[i];
+                    if (p.active) {
+                        p.progress += dt * p.speed * effectivePulseSpeed;
+                        if (p.progress >= 1.25) {
+                            p.active = false;
+                            p.cooldown = (0.4 + Math.random() * 2.4) / cognitive.speedBoost;
+                        }
+                    } else {
+                        p.cooldown -= dt * effectivePulseSpeed;
+                        if (p.cooldown <= 0) { p.active = true; p.progress = 0; }
+                    }
+
+                    for (let s = 0; s < CURVE_SEGMENTS; s++) {
+                        const ptA = p.points[s], ptB = p.points[s + 1];
+                        posAttr.setXYZ(lineVertexIdx, ptA.x, ptA.y, ptA.z);
+                        posAttr.setXYZ(lineVertexIdx + 1, ptB.x, ptB.y, ptB.z);
+
+                        let alpha = p.baseOpacity * (1.0 + cognitive.intensity * 0.35);
+                        if (p.active) {
+                            const distBehind = p.progress - (s / CURVE_SEGMENTS);
+                            if (distBehind >= 0 && distBehind < 0.38) {
+                                alpha += Math.pow(1.0 - (distBehind / 0.38), 1.55) * (0.85 + cognitive.intensity * 0.25);
+                            }
+                        }
+                        alphaAttr.setX(lineVertexIdx, alpha);
+                        alphaAttr.setX(lineVertexIdx + 1, alpha);
+                        lineVertexIdx += 2;
+                    }
+
+                    if (p.active && p.progress >= 0 && p.progress <= 1.0) {
+                        const exactIdx = p.progress * CURVE_SEGMENTS;
+                        const lowIdx = Math.floor(exactIdx);
+                        const highIdx = Math.min(CURVE_SEGMENTS, lowIdx + 1);
+                        const headPos = p.points[lowIdx].clone().lerp(p.points[highIdx], exactIdx - lowIdx);
+                        pulsePosAttr.setXYZ(i, headPos.x, headPos.y, headPos.z);
+                        pulseSizeAttr.setX(i, (1.85 + cognitive.intensity * 0.85) * Math.sin(p.progress * Math.PI));
+                    } else {
+                        pulseSizeAttr.setX(i, 0);
+                    }
+                }
+
+                posAttr.needsUpdate = true;
+                alphaAttr.needsUpdate = true;
+                pulsePosAttr.needsUpdate = true;
+                pulseSizeAttr.needsUpdate = true;
+
+                inspectRaycasting();
+                renderer.render(scene, camera);
+            }
+
+            window.onload = function () { animate(); };
+        })();
+    </script>
+</body>
+</html>

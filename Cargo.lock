@@ -1649,12 +1649,15 @@ name = "nephron-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "eframe",
  "nephron-bridge",
  "nephron-cad",
  "nephron-pets",
  "nephron-swarm",
  "nephron-voice",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

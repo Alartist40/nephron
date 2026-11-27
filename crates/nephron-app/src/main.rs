@@ -3,7 +3,10 @@
 mod app;
 mod brain;
 mod doctor;
+mod icons;
 mod overlays;
+mod studio;
+mod studio_ui;
 mod theme;
 
 use app::NephronApp;
