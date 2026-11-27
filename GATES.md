@@ -93,3 +93,7 @@
   - CHECK: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo build --release -j 2 -p nephron-app`
   - EXPECT: exits 0 with 17/17 tests passing and zero clippy warnings
   - EVIDENCE: PASS (exit 0; 17/17 tests passed, 0 warnings, release binary built)
+- **G22:** Portable offline `faster-whisper` (`tiny.en` in `vendor/stt`), Auto-VAD (`threshold_rms: 0.008`, enabled by default), and async non-blocking mic transcription for Ollama & Cynapse
+  - CHECK: `HF_HUB_OFFLINE=1 vendor/stt/.venv/bin/python vendor/stt/transcribe.py /tmp/stt_warmup.wav && cargo test --workspace`
+  - EXPECT: transcribes offline with exit 0 and all 17/17 workspace tests pass
+  - EVIDENCE: PASS (exit 0; transcribed `"Hello, nephron."` offline, 17/17 tests passed, release binary built)
