@@ -4,7 +4,7 @@ use crate::{play_wav_bytes, PocketTtsClient};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self, Sender},
-    Arc,
+    Arc, Mutex,
 };
 use std::thread;
 
@@ -59,6 +59,7 @@ pub struct SpeechPipeline {
     tx: Sender<(u64, String)>,
     speaking: Arc<AtomicBool>,
     epoch: Arc<AtomicU64>,
+    voice: Arc<Mutex<String>>,
 }
 
 impl SpeechPipeline {
@@ -67,9 +68,11 @@ impl SpeechPipeline {
         let (wav_tx, wav_rx) = mpsc::channel::<(u64, Vec<u8>)>();
         let speaking = Arc::new(AtomicBool::new(false));
         let epoch = Arc::new(AtomicU64::new(0));
+        let voice_arc = Arc::new(Mutex::new(voice));
         let speaking_play = speaking.clone();
         let epoch_synth = epoch.clone();
         let epoch_play = epoch.clone();
+        let voice_synth = voice_arc.clone();
 
         // Stage 1: Async-capable synthesis worker (synthesizes ahead of playback)
         thread::spawn(move || {
@@ -81,7 +84,8 @@ impl SpeechPipeline {
                 if ep != epoch_synth.load(Ordering::Relaxed) {
                     continue;
                 }
-                if let Ok(wav) = rt.block_on(tts.synthesize(&sentence, Some(&voice))) {
+                let v = voice_synth.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                if let Ok(wav) = rt.block_on(tts.synthesize(&sentence, Some(&v))) {
                     if !wav.is_empty()
                         && ep == epoch_synth.load(Ordering::Relaxed)
                         && wav_tx.send((ep, wav)).is_err()
@@ -104,7 +108,11 @@ impl SpeechPipeline {
             }
         });
 
-        Self { tx, speaking, epoch }
+        Self { tx, speaking, epoch, voice: voice_arc }
+    }
+
+    pub fn set_voice(&self, voice: String) {
+        *self.voice.lock().unwrap_or_else(|e| e.into_inner()) = voice;
     }
 
     pub fn enqueue(&self, sentence: String) {

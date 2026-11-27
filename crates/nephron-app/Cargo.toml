@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
 eframe.workspace = true
 nephron-bridge = { path = "../nephron-bridge" }
 nephron-cad = { path = "../nephron-cad" }

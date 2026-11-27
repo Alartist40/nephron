@@ -168,6 +168,28 @@ impl CynapseClient {
         self.post_sse(&body, tx).await;
     }
 
+    pub async fn stream_vision_prompt_model(
+        &self,
+        model_id: &str,
+        prompt: &str,
+        png_b64: String,
+        tx: mpsc::UnboundedSender<StreamEvent>,
+    ) {
+        let data_url = format!("data:image/png;base64,{png_b64}");
+        let body = serde_json::json!({
+            "model": model_id,
+            "stream": true,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": prompt },
+                    { "type": "image_url", "image_url": { "url": data_url } }
+                ]
+            }]
+        });
+        self.post_sse(&body, tx).await;
+    }
+
     async fn post_sse<T: Serialize>(&self, body: &T, tx: mpsc::UnboundedSender<StreamEvent>) {
         let started = Instant::now();
         let url = format!("{}/v1/chat/completions", self.base_url);

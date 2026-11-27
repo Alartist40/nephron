@@ -97,3 +97,7 @@
   - CHECK: `HF_HUB_OFFLINE=1 vendor/stt/.venv/bin/python vendor/stt/transcribe.py /tmp/stt_warmup.wav && cargo test --workspace`
   - EXPECT: transcribes offline with exit 0 and all 17/17 workspace tests pass
   - EVIDENCE: PASS (exit 0; transcribed `"Hello, nephron."` offline, 17/17 tests passed, release binary built)
+- **G23:** Native zero-Python `whisper.cpp` (`whisper-cli` + `ggml-tiny.en.bin`), batched `egui::Mesh` brain stars, persistent SQLite settings, `Ctrl+K` Command Palette, `Ctrl+Shift+S` local privacy-first Screen Vision, voice selector, CAD `mm` ruler + `Explode` slider, right-click message menu, and multi-step CUA workflows
+  - CHECK: `vendor/whisper.cpp/build/bin/whisper-cli -m vendor/whisper.cpp/models/ggml-tiny.en.bin -f vendor/whisper.cpp/samples/jfk.wav --no-timestamps -nt && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo build --release -j 2 -p nephron-app`
+  - EXPECT: exits 0 with native STT transcription, 17/17 tests, and zero clippy warnings
+  - EVIDENCE: PASS (exit 0; native `whisper-cli` transcribed JFK sample, 17/17 tests passed, 0 warnings, release binary built)

@@ -85,6 +85,12 @@ impl CadViewport {
             painter.line_segment([a, b], Stroke::new(1.0_f32, grid_col));
             painter.line_segment([c, d], Stroke::new(1.0_f32, grid_col));
         }
+        // Bounding-box ruler ticks along grid edges
+        let (rx_end, _) = proj(mesh_center[0] + grid_span, mesh_center[1] - grid_span, mesh_center[2] + grid_z);
+        let (ry_end, _) = proj(mesh_center[0] - grid_span, mesh_center[1] + grid_span, mesh_center[2] + grid_z);
+        let tick_col = Color32::from_rgba_unmultiplied(125, 211, 252, 110);
+        painter.text(rx_end + egui::vec2(6.0, 0.0), egui::Align2::LEFT_CENTER, format!("X {:.0}mm", dims[0]), egui::FontId::monospace(9.5), tick_col);
+        painter.text(ry_end + egui::vec2(6.0, 0.0), egui::Align2::LEFT_CENTER, format!("Y {:.0}mm", dims[1]), egui::FontId::monospace(9.5), tick_col);
 
         let mut projected: Vec<(f32, [Pos2; 3], Color32)> = self
             .mesh

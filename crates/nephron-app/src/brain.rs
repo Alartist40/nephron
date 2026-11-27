@@ -408,9 +408,10 @@ impl BrainAtlas {
             }
         }
 
-        // 3. Cortical glitter stars + regional cognitive lobe illumination
+        // 3. Cortical glitter stars (batched into a single egui::Mesh for 60 FPS ARM64 speed)
         let pointer = ui.input(|i| i.pointer.hover_pos());
         self.hovered_label = None;
+        let mut star_mesh = egui::Mesh::default();
         for n in &self.nodes {
             let (p, depth) = project(n.pos);
             if !rect.contains(p) {
@@ -465,13 +466,16 @@ impl BrainAtlas {
             if hover_boost > 0.3 || (n.is_hub && (flash > 0.8 || reg_a + reg_b > 0.55)) {
                 painter.circle_filled(p, sz * 2.2, Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (alpha * 42.0) as u8));
             }
-            painter.rect_filled(Rect::from_center_size(p, egui::vec2(sz, sz)), 0.0, c);
+            star_mesh.add_colored_rect(Rect::from_center_size(p, egui::vec2(sz, sz)), c);
 
             if let (Some(lbl), Some(ptr)) = (&n.label, pointer) {
                 if (p.x - ptr.x).abs() < 14.0 && (p.y - ptr.y).abs() < 14.0 && p.distance(ptr) < 14.0 {
                     self.hovered_label = Some(lbl.clone());
                 }
             }
+        }
+        if !star_mesh.is_empty() {
+            painter.add(egui::Shape::mesh(star_mesh));
         }
 
         if let Some(lbl) = &self.hovered_label {

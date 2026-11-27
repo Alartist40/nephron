@@ -64,6 +64,10 @@ impl MemoryStore {
                  material TEXT NOT NULL,
                  quantity INTEGER NOT NULL,
                  scad_path TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS settings (
+                 key TEXT PRIMARY KEY,
+                 value TEXT NOT NULL
              );",
         )?;
         let _ = conn.execute("ALTER TABLE memories ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0", []);
@@ -130,6 +134,20 @@ impl MemoryStore {
         let n = self.conn.execute("DELETE FROM memories WHERE pinned = 0", [])?;
         let _ = self.conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')", []);
         Ok(n)
+    }
+
+    pub fn get_setting(&self, key: &str) -> Option<String> {
+        self.conn
+            .query_row("SELECT value FROM settings WHERE key = ?1", params![key], |r| r.get(0))
+            .ok()
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
     }
 
     pub fn save_part(&self, name: &str, material: &str, quantity: i32, scad_path: &str) -> Result<i64> {

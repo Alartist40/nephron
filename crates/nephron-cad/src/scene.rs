@@ -76,19 +76,35 @@ impl CadDesign {
     }
 
     pub fn build_mesh(&self) -> Result<StlMesh> {
+        self.build_mesh_exploded(0.0)
+    }
+
+    pub fn build_mesh_exploded(&self, explode: f32) -> Result<StlMesh> {
         self.validate()?;
         let has_subtract = self
             .parts
             .iter()
             .any(|p| p.primitives.iter().any(|pr| pr.op == "subtract"));
-        if has_subtract {
+        if has_subtract && explode <= 0.001 {
             return build_sdf_csg_mesh(&self.parts);
         }
         let mut out = StlMesh::default();
-        for part in &self.parts {
+        let n = self.parts.len().max(1) as f32;
+        for (idx, part) in self.parts.iter().enumerate() {
+            let offset = if explode > 0.001 && self.parts.len() > 1 {
+                let angle = (idx as f32 / n) * TAU;
+                let dist = explode * 35.0;
+                [angle.cos() * dist, angle.sin() * dist, (idx as f32 - (n - 1.0) * 0.5) * explode * 18.0]
+            } else {
+                [0.0, 0.0, 0.0]
+            };
             for prim in &part.primitives {
+                if prim.op == "subtract" {
+                    continue;
+                }
                 let mut m = build_primitive(prim)?;
-                transform_mesh(&mut m, prim.pos, prim.rot_deg);
+                let pos = [prim.pos[0] + offset[0], prim.pos[1] + offset[1], prim.pos[2] + offset[2]];
+                transform_mesh(&mut m, pos, prim.rot_deg);
                 out.merge(m);
             }
         }

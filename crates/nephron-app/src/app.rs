@@ -2,6 +2,7 @@
 
 use crate::brain::{BrainActivity, BrainAtlas};
 use crate::overlays::{set_pet_mood_hint, OverlayChild};
+use base64::Engine;
 use eframe::egui::{self, Align2, Color32, Frame, Pos2, Rect, Stroke};
 use nephron_bridge::{
     format_citations_prompt, BackendKind, CadPart, ChatMessage, ChatRole, CynapseClient,
@@ -16,7 +17,7 @@ use nephron_pets::PetSpecies;
 use nephron_swarm::actions::{execute_action, ComputerAction};
 use nephron_voice::{
     audio::SAMPLE_RATE, encode_pcm16_wav, transcribe_wav_local,
-    tts::{DEFAULT_TTS_URL, DEFAULT_VOICE},
+    tts::{DEFAULT_TTS_URL, DEFAULT_VOICE, FEMALE_VOICES},
     wav_to_base64, AudioCapture, PocketTtsClient, PocketTtsSidecar, SentenceBuffer, SpeechPipeline,
     VadState,
 };
@@ -79,7 +80,10 @@ pub struct NephronApp {
     _tts_sidecar: PocketTtsSidecar,
     speech: SpeechPipeline,
     sentence_buf: SentenceBuffer,
+    tts_voice: String,
     auto_tts: bool,
+    cmd_palette_open: bool,
+    cmd_query: String,
     last_export_path: Option<PathBuf>,
     capture: Option<AudioCapture>,
     pet_species: PetSpecies,
@@ -95,6 +99,7 @@ pub struct NephronApp {
     cad_buf: String,
     cad_repairs: u8,
     cad_prompt: String,
+    cad_explode: f32,
     cv_gesture: Option<CvGestureTracker>,
     brain: BrainAtlas,
     searcher: WebSearcher,
@@ -106,20 +111,39 @@ pub struct NephronApp {
 
 impl NephronApp {
     pub fn new(rt: Runtime, client: CynapseClient, store: MemoryStore) -> Self {
+        let saved_backend = store.get_setting("backend");
+        let backend_kind = if saved_backend.as_deref() == Some("ollama") {
+            BackendKind::Ollama
+        } else {
+            BackendKind::Cynapse
+        };
+        let client = if backend_kind == BackendKind::Ollama {
+            CynapseClient::with_kind(BackendKind::Ollama.default_url(), BackendKind::Ollama).unwrap_or(client)
+        } else {
+            client
+        };
+        let selected_ollama = store.get_setting("ollama_model").unwrap_or_else(|| "llama3.2".into());
+        let tts_voice = store.get_setting("tts_voice").unwrap_or_else(|| DEFAULT_VOICE.into());
+        let auto_tts = store.get_setting("auto_tts").map(|v| v != "0").unwrap_or(true);
+        let auto_vad = store.get_setting("auto_vad").map(|v| v != "0").unwrap_or(true);
+        let inject_pinned = store.get_setting("inject_pinned").map(|v| v != "0").unwrap_or(true);
         let tts_url = std::env::var("NEPHRON_TTS_URL").unwrap_or_else(|_| DEFAULT_TTS_URL.into());
-        let _tts_sidecar = PocketTtsSidecar::spawn(8000, DEFAULT_VOICE);
+        let _tts_sidecar = PocketTtsSidecar::spawn(8000, &tts_voice);
         let tts = PocketTtsClient::new(tts_url).expect("valid pocket-tts url");
-        let speech = SpeechPipeline::spawn(tts, DEFAULT_VOICE.into());
+        let speech = SpeechPipeline::spawn(tts, tts_voice.clone());
         let cad_parts = store.list_parts().unwrap_or_default();
         let memories = store.recent_memories(40).unwrap_or_default();
         let mut brain = BrainAtlas::default();
+        if let Some(p) = store.get_setting("palette_idx").and_then(|s| s.parse().ok()) {
+            brain.palette_idx = p;
+        }
         brain.build_anatomy(&memories);
         let mut app = Self {
             rt,
             client,
-            backend_kind: BackendKind::Cynapse,
+            backend_kind,
             ollama_models: Vec::new(),
-            selected_ollama: "llama3.2".into(),
+            selected_ollama,
             ollama_rx: None,
             store,
             model: ModelProfile::MiniCpm5_1B,
@@ -127,8 +151,8 @@ impl NephronApp {
             active_tab: None,
             bubble_open: true,
             web_mode: false,
-            inject_pinned: true,
-            auto_vad: true,
+            inject_pinned,
+            auto_vad,
             vad_was_speech: false,
             pet_active: false,
             swarm_active: false,
@@ -150,7 +174,10 @@ impl NephronApp {
             _tts_sidecar,
             speech,
             sentence_buf: SentenceBuffer::default(),
-            auto_tts: true,
+            tts_voice,
+            auto_tts,
+            cmd_palette_open: false,
+            cmd_query: String::new(),
             last_export_path: None,
             capture: None,
             pet_species: PetSpecies::Chiba,
@@ -166,6 +193,7 @@ impl NephronApp {
             cad_buf: String::new(),
             cad_repairs: 0,
             cad_prompt: String::new(),
+            cad_explode: 0.0,
             cv_gesture: None,
             brain,
             searcher: WebSearcher::default(),
@@ -175,8 +203,27 @@ impl NephronApp {
             ui_time: 0.0,
         };
         app.poll_system();
+        if app.backend_kind == BackendKind::Ollama {
+            app.refresh_ollama();
+        }
         set_pet_mood_hint("idle");
         app
+    }
+
+    fn save_settings(&self) {
+        let _ = self.store.set_setting(
+            "backend",
+            match self.backend_kind {
+                BackendKind::Cynapse => "cynapse",
+                BackendKind::Ollama => "ollama",
+            },
+        );
+        let _ = self.store.set_setting("ollama_model", &self.selected_ollama);
+        let _ = self.store.set_setting("tts_voice", &self.tts_voice);
+        let _ = self.store.set_setting("auto_tts", if self.auto_tts { "1" } else { "0" });
+        let _ = self.store.set_setting("auto_vad", if self.auto_vad { "1" } else { "0" });
+        let _ = self.store.set_setting("inject_pinned", if self.inject_pinned { "1" } else { "0" });
+        let _ = self.store.set_setting("palette_idx", &self.brain.palette_idx.to_string());
     }
 
     fn switch_backend(&mut self, kind: BackendKind) {
@@ -190,6 +237,7 @@ impl NephronApp {
             if self.pet_active {
                 self.pet_proc.kill();
             }
+            self.save_settings();
         }
     }
 
@@ -226,6 +274,54 @@ impl NephronApp {
         self.memory_hits = mems;
     }
 
+    fn capture_and_describe_screen(&mut self, question: String) {
+        if self.streaming {
+            return;
+        }
+        let shot = std::env::temp_dir().join(format!("nephron_vision_{}.png", std::process::id()));
+        let cap_ok = execute_action(&ComputerAction::CaptureScreen(shot.clone())).is_ok();
+        let bytes = if cap_ok { std::fs::read(&shot).ok() } else { None };
+        // Privacy-first: delete local screenshot immediately after reading into memory
+        let _ = std::fs::remove_file(&shot);
+        self.bubble_open = true;
+        self.messages.push(ChatMessage { role: ChatRole::User, content: question.clone() });
+        let Some(png) = bytes else {
+            self.messages.push(ChatMessage {
+                role: ChatRole::Assistant,
+                content: "Screen capture failed (install gnome-screenshot or xfce4-screenshooter).".into(),
+            });
+            return;
+        };
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+        self.messages.push(ChatMessage { role: ChatRole::Assistant, content: String::new() });
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.stream_rx = Some(rx);
+        self.streaming = true;
+        let client = self.client.clone();
+        let model_id = self.active_model_id();
+        self.rt.spawn(async move {
+            client.stream_vision_prompt_model(&model_id, &question, b64, tx).await;
+        });
+    }
+
+    fn run_cua_workflow(&mut self) {
+        self.bubble_open = true;
+        let steps: [(&str, ComputerAction); 3] = [
+            ("Git Status", ComputerAction::AllowlistedCheck { bin: "git", args: vec!["status".into(), "-s".into()] }),
+            ("Memory", ComputerAction::AllowlistedCheck { bin: "free", args: vec!["-h".into()] }),
+            ("Notify", ComputerAction::Notify { title: "Nephron CUA".into(), body: "Autonomous workflow checks complete.".into() }),
+        ];
+        let mut log = Vec::new();
+        for (label, act) in steps {
+            let res = execute_action(&act).unwrap_or_else(|e| format!("err: {e}"));
+            log.push(format!("• {label}: {res}"));
+        }
+        self.messages.push(ChatMessage {
+            role: ChatRole::Assistant,
+            content: format!("CUA Workflow complete:\n{}", log.join("\n")),
+        });
+    }
+
     fn send_prompt(&mut self) {
         let prompt = self.input.trim().to_string();
         if prompt.is_empty() || self.streaming {
@@ -237,6 +333,14 @@ impl NephronApp {
 
     fn dispatch_prompt(&mut self, prompt: String) {
         let lower = prompt.to_lowercase();
+        if lower.contains("on my screen") || lower.contains("look at my screen") || lower == "screen" {
+            self.capture_and_describe_screen(prompt);
+            return;
+        }
+        if lower.starts_with("workflow") {
+            self.run_cua_workflow();
+            return;
+        }
         if lower.starts_with("cua:") || lower == "open terminal" || lower == "take screenshot" {
             self.bubble_open = true;
             let res = if lower.contains("terminal") {
@@ -685,6 +789,13 @@ impl eframe::App for NephronApp {
         if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::M)) {
             self.toggle_mic();
         }
+        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::K)) {
+            self.cmd_palette_open = !self.cmd_palette_open;
+            self.cmd_query.clear();
+        }
+        if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::S)) {
+            self.capture_and_describe_screen("What is on my screen right now?".into());
+        }
         // Auto-VAD hands-free turn-taking & Barge-In interrupt
         if let Some(cap) = &self.capture {
             let vst = cap.current_vad();
@@ -821,8 +932,12 @@ impl eframe::App for NephronApp {
                                         self.switch_backend(BackendKind::Ollama);
                                     }
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        ui.checkbox(&mut self.auto_tts, "tts");
-                                        ui.checkbox(&mut self.auto_vad, "vad");
+                                        if ui.checkbox(&mut self.auto_tts, "tts").changed() {
+                                            self.save_settings();
+                                        }
+                                        if ui.checkbox(&mut self.auto_vad, "vad").changed() {
+                                            self.save_settings();
+                                        }
                                     });
                                 });
                                 ui.horizontal(|ui| {
@@ -835,7 +950,9 @@ impl eframe::App for NephronApp {
                                     } else {
                                         egui::ComboBox::from_id_salt("ol_m").selected_text(&self.selected_ollama).show_ui(ui, |ui| {
                                             for m in &self.ollama_models {
-                                                ui.selectable_value(&mut self.selected_ollama, m.clone(), m);
+                                                if ui.selectable_value(&mut self.selected_ollama, m.clone(), m).clicked() {
+                                                    self.save_settings();
+                                                }
                                             }
                                         });
                                         if ui.small_button("↻").clicked() {
@@ -845,6 +962,17 @@ impl eframe::App for NephronApp {
                                     egui::ComboBox::from_id_salt("eff").selected_text(self.effort.as_str()).show_ui(ui, |ui| {
                                         for e in EffortLevel::ALL {
                                             ui.selectable_value(&mut self.effort, e, e.as_str());
+                                        }
+                                    });
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.small("voice");
+                                    egui::ComboBox::from_id_salt("tts_v").selected_text(&self.tts_voice).show_ui(ui, |ui| {
+                                        for &v in FEMALE_VOICES {
+                                            if ui.selectable_value(&mut self.tts_voice, v.to_string(), v).clicked() {
+                                                self.speech.set_voice(v.to_string());
+                                                self.save_settings();
+                                            }
                                         }
                                     });
                                 });
@@ -919,8 +1047,11 @@ impl eframe::App for NephronApp {
                                             changed |= ui.add(egui::DragValue::new(&mut prim.size[1]).range(1.0..=500.0).prefix("D ")).changed();
                                             changed |= ui.add(egui::DragValue::new(&mut prim.size[2]).range(1.0..=500.0).prefix("H ")).changed();
                                         });
+                                        if d.parts.len() > 1 {
+                                            changed |= ui.add(egui::Slider::new(&mut self.cad_explode, 0.0..=1.0).text("explode")).changed();
+                                        }
                                         if changed {
-                                            if let Ok(m) = d.build_mesh() {
+                                            if let Ok(m) = d.build_mesh_exploded(self.cad_explode) {
                                                 self.cad_viewport.mesh = m;
                                             }
                                         }
@@ -959,6 +1090,9 @@ impl eframe::App for NephronApp {
                                         if let Ok(out) = execute_action(&ComputerAction::AllowlistedCheck { bin: "uname", args: vec!["-a".into()] }) {
                                             self.messages.push(ChatMessage { role: ChatRole::Assistant, content: out });
                                         }
+                                    }
+                                    if ui.small_button("⚡ flow").clicked() {
+                                        self.run_cua_workflow();
                                     }
                                 });
                             }
@@ -1050,6 +1184,7 @@ impl eframe::App for NephronApp {
                 .show(ctx, |ui| {
                     kinetic_glass().show(ui, |ui| {
                         ui.set_width(320.0);
+                        let mut ctx_action: Option<(u8, String)> = None;
                         egui::ScrollArea::vertical().max_height(210.0).stick_to_bottom(true).show(ui, |ui| {
                             for m in &self.messages {
                                 let (who, col) = match m.role {
@@ -1058,7 +1193,21 @@ impl eframe::App for NephronApp {
                                     ChatRole::System => ("System", Color32::from_rgb(148, 163, 184)),
                                 };
                                 ui.colored_label(col, egui::RichText::new(who).strong().size(11.0));
-                                ui.label(egui::RichText::new(&m.content).size(12.0));
+                                let lbl = ui.add(egui::Label::new(egui::RichText::new(&m.content).size(12.0)).sense(egui::Sense::click()));
+                                lbl.context_menu(|ui| {
+                                    if ui.button("Copy").clicked() {
+                                        ctx_action = Some((0, m.content.clone()));
+                                        ui.close_menu();
+                                    }
+                                    if ui.button("Pin to Brain").clicked() {
+                                        ctx_action = Some((1, m.content.clone()));
+                                        ui.close_menu();
+                                    }
+                                    if ui.button("Send to CAD").clicked() {
+                                        ctx_action = Some((2, m.content.clone()));
+                                        ui.close_menu();
+                                    }
+                                });
                                 ui.add_space(4.0);
                             }
                             if !self.web_sources.is_empty() {
@@ -1108,6 +1257,21 @@ impl eframe::App for NephronApp {
                             }
                         });
                         ui.add_space(4.0);
+                        if let Some((act_id, txt)) = ctx_action {
+                            match act_id {
+                                0 => ctx.copy_text(txt),
+                                1 => {
+                                    if let Ok(id) = self.store.save_memory("user", &txt) {
+                                        let _ = self.store.pin_memory(id, true);
+                                        self.sync_brain();
+                                    }
+                                }
+                                _ => {
+                                    self.active_tab = Some(DrawerTab::Cad);
+                                    self.generate_cad(txt);
+                                }
+                            }
+                        }
                         ui.horizontal(|ui| {
                             let resp = ui.add_sized([255.0, 26.0], egui::TextEdit::singleline(&mut self.input).hint_text("Ask, search, or build CAD..."));
                             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -1153,7 +1317,9 @@ impl eframe::App for NephronApp {
                     ui.painter().circle_filled(c, r, Color32::from_rgba_unmultiplied(15, 23, 42, 225));
                     ui.painter().circle_stroke(c, r, Stroke::new(1.5_f32, ring_col));
 
-                    if self.capture.is_some() {
+                    if let Some(cap) = &self.capture {
+                        let rms = (cap.current_rms() * 8.0).clamp(0.0, 1.0);
+                        ui.painter().circle_stroke(c, r + 3.0 + rms * 14.0, Stroke::new(1.8_f32, Color32::from_rgba_unmultiplied(251, 113, 133, 140)));
                         for k in 0..4 {
                             let h = 6.0 + ((self.ui_time * 8.0 + k as f32 * 1.3).sin() * 0.5 + 0.5) * 10.0;
                             let x = c.x - 9.0 + k as f32 * 6.0;
@@ -1173,6 +1339,65 @@ impl eframe::App for NephronApp {
                     }
                 });
             });
+
+        if self.cmd_palette_open {
+            egui::Area::new(egui::Id::new("cmd_palette"))
+                .anchor(Align2::CENTER_CENTER, [0.0, -40.0])
+                .show(ctx, |ui| {
+                    kinetic_glass().show(ui, |ui| {
+                        ui.set_min_width(300.0);
+                        ui.set_max_width(300.0);
+                        let r = ui.add_sized([280.0, 26.0], egui::TextEdit::singleline(&mut self.cmd_query).hint_text("Command (Ctrl+K)..."));
+                        r.request_focus();
+                        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                            self.cmd_palette_open = false;
+                        }
+                        let q = self.cmd_query.to_lowercase();
+                        let cmds = [
+                            ("Toggle Mic (Ctrl+M)", 0u8),
+                            ("Switch Cynapse / Ollama", 1),
+                            ("Screen Vision (Ctrl+Shift+S)", 2),
+                            ("Open CAD Studio", 3),
+                            ("Export STL", 4),
+                            ("Toggle Pet Companion", 5),
+                            ("Toggle Swarm Cursors", 6),
+                            ("Run CUA Workflow", 7),
+                            ("Synaptic Cascade", 8),
+                            ("Clear Unpinned Memory", 9),
+                        ];
+                        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        let mut picked: Option<u8> = None;
+                        for (label, id) in cmds {
+                            if (q.is_empty() || label.to_lowercase().contains(&q))
+                                && (ui.selectable_label(false, label).clicked() || (enter && picked.is_none()))
+                            {
+                                picked = Some(id);
+                            }
+                        }
+                        if let Some(id) = picked {
+                            self.cmd_palette_open = false;
+                            match id {
+                                0 => self.toggle_mic(),
+                                1 => {
+                                    let next = if self.backend_kind == BackendKind::Cynapse { BackendKind::Ollama } else { BackendKind::Cynapse };
+                                    self.switch_backend(next);
+                                }
+                                2 => self.capture_and_describe_screen("What is on my screen right now?".into()),
+                                3 => self.active_tab = Some(DrawerTab::Cad),
+                                4 => self.export_stl(),
+                                5 => self.pet_active = !self.pet_active,
+                                6 => self.swarm_active = !self.swarm_active,
+                                7 => self.run_cua_workflow(),
+                                8 => self.brain.trigger_cascade(),
+                                _ => {
+                                    let _ = self.store.clear_unpinned();
+                                    self.sync_brain();
+                                }
+                            }
+                        }
+                    });
+                });
+        }
 
         // Overlay subprocesses (Pet & Swarm)
         let sp_arg = match self.pet_species {
