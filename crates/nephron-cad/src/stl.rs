@@ -88,6 +88,27 @@ impl StlMesh {
         }
     }
 
+    /// Signed volume in cm³ (falls back to bounding-box estimate if open mesh).
+    pub fn volume_cm3(&self) -> f32 {
+        let mut sum = 0.0f64;
+        for t in &self.triangles {
+            let [a, b, c] = t.verts;
+            let cross_x = b[1] as f64 * c[2] as f64 - b[2] as f64 * c[1] as f64;
+            let cross_y = b[2] as f64 * c[0] as f64 - b[0] as f64 * c[2] as f64;
+            let cross_z = b[0] as f64 * c[1] as f64 - b[1] as f64 * c[0] as f64;
+            sum += a[0] as f64 * cross_x + a[1] as f64 * cross_y + a[2] as f64 * cross_z;
+        }
+        (sum.abs() / 6.0 / 1000.0) as f32
+    }
+
+    /// Rough PETG filament grams & print minutes (~35% effective infill+walls).
+    pub fn print_estimate(&self) -> (f32, u32) {
+        let vol = self.volume_cm3();
+        let grams = (vol * 0.35 * 1.24).max(0.5);
+        let mins = (grams * 1.6 + 4.0).round() as u32;
+        (grams, mins)
+    }
+
     pub fn merge(&mut self, mut other: StlMesh) {
         self.triangles.append(&mut other.triangles);
     }

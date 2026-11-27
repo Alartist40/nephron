@@ -130,15 +130,18 @@ impl CadViewport {
         }
 
         let dims = self.mesh.dimensions();
+        let (grams, mins) = self.mesh.print_estimate();
         painter.text(
             Pos2::new(rect.center().x, rect.top() + 18.0),
             egui::Align2::CENTER_TOP,
             format!(
-                "CAD Studio · {} tris · {:.1}×{:.1}×{:.1} mm ({}) — drag to orbit, scroll to zoom",
+                "CAD Studio · {} tris · {:.1}×{:.1}×{:.1} mm · ~{:.1}g / ~{}m ({})",
                 self.mesh.triangles.len(),
                 dims[0],
                 dims[1],
                 dims[2],
+                grams,
+                mins,
                 self.backend_label
             ),
             egui::FontId::proportional(12.0),

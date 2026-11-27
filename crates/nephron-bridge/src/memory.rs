@@ -68,6 +68,12 @@ impl MemoryStore {
              CREATE TABLE IF NOT EXISTS settings (
                  key TEXT PRIMARY KEY,
                  value TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS cad_revisions (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 name TEXT NOT NULL,
+                 design_json TEXT NOT NULL,
+                 created_at TEXT NOT NULL
              );",
         )?;
         let _ = conn.execute("ALTER TABLE memories ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0", []);
@@ -148,6 +154,27 @@ impl MemoryStore {
             params![key, value],
         )?;
         Ok(())
+    }
+
+    pub fn save_cad_revision(&self, name: &str, design_json: &str) -> Result<i64> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO cad_revisions (name, design_json, created_at) VALUES (?1, ?2, ?3)",
+            params![name, design_json, now],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn list_cad_revisions(&self, limit: usize) -> Vec<(String, String)> {
+        let Ok(mut stmt) = self.conn.prepare(
+            "SELECT name, design_json FROM cad_revisions ORDER BY id DESC LIMIT ?1",
+        ) else {
+            return Vec::new();
+        };
+        let Ok(rows) = stmt.query_map(params![limit as i64], |r| Ok((r.get(0)?, r.get(1)?))) else {
+            return Vec::new();
+        };
+        rows.filter_map(Result::ok).collect()
     }
 
     pub fn save_part(&self, name: &str, material: &str, quantity: i32, scad_path: &str) -> Result<i64> {

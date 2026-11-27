@@ -13,4 +13,5 @@ nephron-cad = { path = "../nephron-cad" }
 nephron-pets = { path = "../nephron-pets" }
 nephron-swarm = { path = "../nephron-swarm" }
 nephron-voice = { path = "../nephron-voice" }
+serde_json.workspace = true
 tokio.workspace = true

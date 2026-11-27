@@ -101,3 +101,7 @@
   - CHECK: `vendor/whisper.cpp/build/bin/whisper-cli -m vendor/whisper.cpp/models/ggml-tiny.en.bin -f vendor/whisper.cpp/samples/jfk.wav --no-timestamps -nt && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo build --release -j 2 -p nephron-app`
   - EXPECT: exits 0 with native STT transcription, 17/17 tests, and zero clippy warnings
   - EVIDENCE: PASS (exit 0; native `whisper-cli` transcribed JFK sample, 17/17 tests passed, 0 warnings, release binary built)
+- **G24:** Print-time/filament estimator, CAD revision history (`◀` / `▶`), drag-and-drop file intelligence, Pomodoro break reminders (`⏱ 25m`), and SBC Hardware Telemetry HUD (`hw` / CPU °C + RAM + tok/s)
+  - CHECK: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo build --release -j 2 -p nephron-app`
+  - EXPECT: exits 0 with 17/17 tests and zero clippy warnings
+  - EVIDENCE: PASS (exit 0; 17/17 tests passed, 0 warnings, release binary built)

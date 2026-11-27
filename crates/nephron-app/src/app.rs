@@ -11,7 +11,7 @@ use nephron_bridge::{
 };
 use nephron_cad::{
     cad_repair_prompt, compile_cad_bundle, parse_cad_bundle, sanitize_part_name, CadDesign,
-    CadViewport, CvGestureTracker, CAD_SYSTEM_PROMPT,
+    CadViewport, CvGestureTracker, StlMesh, CAD_SYSTEM_PROMPT,
 };
 use nephron_pets::PetSpecies;
 use nephron_swarm::actions::{execute_action, ComputerAction};
@@ -100,7 +100,11 @@ pub struct NephronApp {
     cad_repairs: u8,
     cad_prompt: String,
     cad_explode: f32,
+    cad_history: Vec<CadDesign>,
+    cad_hist_idx: usize,
     cv_gesture: Option<CvGestureTracker>,
+    pomo_end: Option<Instant>,
+    show_hw_hud: bool,
     brain: BrainAtlas,
     searcher: WebSearcher,
     web_sources: Vec<SearchResult>,
@@ -132,6 +136,11 @@ impl NephronApp {
         let tts = PocketTtsClient::new(tts_url).expect("valid pocket-tts url");
         let speech = SpeechPipeline::spawn(tts, tts_voice.clone());
         let cad_parts = store.list_parts().unwrap_or_default();
+        let cad_history: Vec<CadDesign> = store
+            .list_cad_revisions(16)
+            .into_iter()
+            .filter_map(|(_, j)| serde_json::from_str::<CadDesign>(&j).ok())
+            .collect();
         let memories = store.recent_memories(40).unwrap_or_default();
         let mut brain = BrainAtlas::default();
         if let Some(p) = store.get_setting("palette_idx").and_then(|s| s.parse().ok()) {
@@ -194,7 +203,11 @@ impl NephronApp {
             cad_repairs: 0,
             cad_prompt: String::new(),
             cad_explode: 0.0,
+            cad_history,
+            cad_hist_idx: 0,
             cv_gesture: None,
+            pomo_end: None,
+            show_hw_hud: false,
             brain,
             searcher: WebSearcher::default(),
             web_sources: Vec::new(),
@@ -483,6 +496,13 @@ impl NephronApp {
             let path_str = res.stl_path.display().to_string();
             self.last_export_path = Some(res.stl_path);
             let _ = self.store.save_part(&self.cad_part_name, "PETG", 1, &path_str);
+            if let Some(d) = &self.cad_design {
+                if let Ok(j) = serde_json::to_string(d) {
+                    let _ = self.store.save_cad_revision(&self.cad_part_name, &j);
+                    self.cad_history.insert(0, d.clone());
+                    self.cad_hist_idx = 0;
+                }
+            }
             self.cad_parts = self.store.list_parts().unwrap_or_default();
             let summary = format!(
                 "Built {} ({tris} tris, {:.0}×{:.0}×{:.0} mm via {}).",
@@ -796,6 +816,53 @@ impl eframe::App for NephronApp {
         if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::S)) {
             self.capture_and_describe_screen("What is on my screen right now?".into());
         }
+        // Pomodoro break reminder check
+        if let Some(end) = self.pomo_end {
+            if Instant::now() >= end {
+                self.pomo_end = None;
+                self.bubble_open = true;
+                self.messages.push(ChatMessage {
+                    role: ChatRole::Assistant,
+                    content: "Focus session complete! Time to stretch and take a short break.".into(),
+                });
+                let _ = execute_action(&ComputerAction::Notify {
+                    title: "Nephron Focus".into(),
+                    body: "25m session done — take a short break!".into(),
+                });
+                if self.auto_tts {
+                    self.speech.enqueue("Focus session complete. Time to stretch and take a short break.".into());
+                }
+            }
+        }
+        // File-drop intelligence (.stl, .scad, code/text)
+        let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        for f in dropped {
+            if let Some(path) = f.path {
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                if ext == "stl" {
+                    if let Ok(bytes) = std::fs::read(&path) {
+                        if let Ok(mesh) = StlMesh::parse(&bytes) {
+                            self.cad_viewport.mesh = mesh;
+                            self.cad_viewport.backend_label = "dropped-stl".into();
+                            self.active_tab = Some(DrawerTab::Cad);
+                        }
+                    }
+                } else if ext == "scad" {
+                    if let Ok(code) = std::fs::read_to_string(&path) {
+                        self.cad_scad = code;
+                        self.cad_design = None;
+                        self.active_tab = Some(DrawerTab::Cad);
+                        self.compile_cad();
+                    }
+                } else if let Ok(txt) = std::fs::read_to_string(&path) {
+                    let snippet: String = txt.chars().take(3500).collect();
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+                    let _ = self.store.save_memory("user", &format!("[file:{name}] {}", snippet.chars().take(120).collect::<String>()));
+                    self.sync_brain();
+                    self.dispatch_prompt(format!("Summarize this dropped file ({name}):\n{snippet}"));
+                }
+            }
+        }
         // Auto-VAD hands-free turn-taking & Barge-In interrupt
         if let Some(cap) = &self.capture {
             let vst = cap.current_vad();
@@ -1015,11 +1082,31 @@ impl eframe::App for NephronApp {
                             }
                             DrawerTab::Cad => {
                                 ui.horizontal(|ui| {
-                                    ui.add_sized([130.0, 22.0], egui::TextEdit::singleline(&mut self.cad_part_name));
+                                    ui.add_sized([100.0, 22.0], egui::TextEdit::singleline(&mut self.cad_part_name));
                                     if ui.small_button("Compile").clicked() { self.compile_cad(); }
                                     if ui.small_button("Gen AI").clicked() {
                                         let d = if self.input.trim().is_empty() { self.cad_part_name.clone() } else { self.input.clone() };
                                         self.generate_cad(d);
+                                    }
+                                    if !self.cad_history.is_empty() {
+                                        if ui.small_button("◀").clicked() && self.cad_hist_idx + 1 < self.cad_history.len() {
+                                            self.cad_hist_idx += 1;
+                                            let d = self.cad_history[self.cad_hist_idx].clone();
+                                            if let Ok(m) = d.build_mesh_exploded(self.cad_explode) {
+                                                self.cad_viewport.mesh = m;
+                                                self.cad_part_name = sanitize_part_name(&d.name);
+                                                self.cad_design = Some(d);
+                                            }
+                                        }
+                                        if ui.small_button("▶").clicked() && self.cad_hist_idx > 0 {
+                                            self.cad_hist_idx -= 1;
+                                            let d = self.cad_history[self.cad_hist_idx].clone();
+                                            if let Ok(m) = d.build_mesh_exploded(self.cad_explode) {
+                                                self.cad_viewport.mesh = m;
+                                                self.cad_part_name = sanitize_part_name(&d.name);
+                                                self.cad_design = Some(d);
+                                            }
+                                        }
                                     }
                                 });
                                 ui.horizontal(|ui| {
@@ -1094,6 +1181,19 @@ impl eframe::App for NephronApp {
                                     if ui.small_button("⚡ flow").clicked() {
                                         self.run_cua_workflow();
                                     }
+                                    let pomo_lbl = if let Some(end) = self.pomo_end {
+                                        let rem = end.saturating_duration_since(Instant::now()).as_secs() / 60;
+                                        format!("⏱ {rem}m")
+                                    } else {
+                                        "⏱ 25m".into()
+                                    };
+                                    if ui.selectable_label(self.pomo_end.is_some(), pomo_lbl).clicked() {
+                                        self.pomo_end = if self.pomo_end.is_some() {
+                                            None
+                                        } else {
+                                            Some(Instant::now() + Duration::from_secs(25 * 60))
+                                        };
+                                    }
                                 });
                             }
                             DrawerTab::Cortex => {
@@ -1106,6 +1206,7 @@ impl eframe::App for NephronApp {
                                         self.brain.trigger_cascade();
                                     }
                                     ui.checkbox(&mut self.web_mode, "web");
+                                    ui.checkbox(&mut self.show_hw_hud, "hw");
                                 });
                                 ui.add(egui::Slider::new(&mut self.brain.pulse_speed, 0.3..=2.5).text("pulse"));
                                 ui.add(egui::Slider::new(&mut self.brain.glitter, 0.4..=1.8).text("glitter"));
@@ -1364,6 +1465,7 @@ impl eframe::App for NephronApp {
                             ("Run CUA Workflow", 7),
                             ("Synaptic Cascade", 8),
                             ("Clear Unpinned Memory", 9),
+                            ("Toggle Hardware HUD", 10),
                         ];
                         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                         let mut picked: Option<u8> = None;
@@ -1389,13 +1491,41 @@ impl eframe::App for NephronApp {
                                 6 => self.swarm_active = !self.swarm_active,
                                 7 => self.run_cua_workflow(),
                                 8 => self.brain.trigger_cascade(),
-                                _ => {
+                                9 => {
                                     let _ = self.store.clear_unpinned();
                                     self.sync_brain();
                                 }
+                                _ => self.show_hw_hud = !self.show_hw_hud,
                             }
                         }
                     });
+                });
+        }
+
+        if self.show_hw_hud {
+            egui::Area::new(egui::Id::new("hw_telemetry_hud"))
+                .anchor(Align2::RIGHT_TOP, [-18.0, 16.0])
+                .show(ctx, |ui| {
+                    Frame::NONE
+                        .fill(Color32::from_rgba_unmultiplied(11, 15, 25, 195))
+                        .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 28)))
+                        .corner_radius(16.0)
+                        .inner_margin(egui::Margin::symmetric(12, 6))
+                        .show(ui, |ui| {
+                            let temp = self
+                                .telemetry
+                                .cpu_temp_c
+                                .map(|c| format!(" · {c:.0}°C"))
+                                .unwrap_or_default();
+                            ui.small(
+                                egui::RichText::new(format!(
+                                    "RAM {}/{} MiB{temp} · {:.1} tok/s",
+                                    self.telemetry.used_mib, self.telemetry.total_mib, self.last_tok_per_sec
+                                ))
+                                .monospace()
+                                .color(Color32::from_rgb(148, 163, 184)),
+                            );
+                        });
                 });
         }
 

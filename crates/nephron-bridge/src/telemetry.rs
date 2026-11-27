@@ -5,13 +5,16 @@ pub struct SystemTelemetry {
     pub total_mib: u64,
     pub available_mib: u64,
     pub used_mib: u64,
+    pub cpu_temp_c: Option<f32>,
 }
 
 impl SystemTelemetry {
     pub fn sample() -> Self {
         #[cfg(target_os = "linux")]
         if let Ok(raw) = std::fs::read_to_string("/proc/meminfo") {
-            return parse_meminfo(&raw);
+            let mut t = parse_meminfo(&raw);
+            t.cpu_temp_c = read_cpu_temp();
+            return t;
         }
         Self::default()
     }
@@ -42,7 +45,15 @@ pub fn parse_meminfo(raw: &str) -> SystemTelemetry {
         total_mib,
         available_mib,
         used_mib: total_mib.saturating_sub(available_mib),
+        cpu_temp_c: None,
     }
+}
+
+#[cfg(target_os = "linux")]
+fn read_cpu_temp() -> Option<f32> {
+    let raw = std::fs::read_to_string("/sys/class/thermal/thermal_zone0/temp").ok()?;
+    let milli: f32 = raw.trim().parse().ok()?;
+    Some(milli / 1000.0)
 }
 
 fn parse_kib(s: &str) -> u64 {
