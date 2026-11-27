@@ -89,7 +89,7 @@
   - CHECK: `cargo test --workspace && ./install.sh`
   - EXPECT: exits 0 with 14/14 tests passing and zero warnings
   - EVIDENCE: PASS (exit 0; 14/14 tests passed, zero warnings, `~/.local/bin/nephron` installed)
-- **G20:** Pure-Rust CAD (`nephron-cad/src/scene.rs`) + auto-repair + backface-culled/wireframe viewport + STL export, portable `pocket-tts` Rust sidecar (`fantine` offline cache + `paraclea`-style pipelined sentence streaming), Ollama `reasoning_effort` fix, synced pet backend/model, Perplexica source cards, and memory pinning/clear
+- **G21:** Kinetic Neural Canvas UI, CV hand-gesture CAD (`cv_experimental`), SDF boolean subtraction (`op: "subtract"`), live `W/D/H` sliders, Auto-VAD & Barge-In, local STT fallback, keyword-linked colored brain hubs, pinned context injection, full-page Perplexica reader + `★` pin, pet lip-sync, and CUA quick actions
   - CHECK: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo build --release -j 2 -p nephron-app`
-  - EXPECT: exits 0 with 16/16 tests passing and zero clippy warnings
-  - EVIDENCE: PASS (exit 0; 16/16 tests passed, 0 warnings, release binary built)
+  - EXPECT: exits 0 with 17/17 tests passing and zero clippy warnings
+  - EVIDENCE: PASS (exit 0; 17/17 tests passed, 0 warnings, release binary built)

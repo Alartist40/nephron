@@ -2,7 +2,7 @@
 
 use crate::{play_wav_bytes, PocketTtsClient};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self, Sender},
     Arc,
 };
@@ -56,16 +56,20 @@ fn find_sentence_break(s: &str) -> Option<usize> {
 /// Decoupled 2-stage pipeline:
 /// Stage 1 (Synthesizer) converts sentence N+1 to WAV while Stage 2 (Player) plays sentence N.
 pub struct SpeechPipeline {
-    tx: Sender<String>,
+    tx: Sender<(u64, String)>,
     speaking: Arc<AtomicBool>,
+    epoch: Arc<AtomicU64>,
 }
 
 impl SpeechPipeline {
     pub fn spawn(tts: PocketTtsClient, voice: String) -> Self {
-        let (tx, rx) = mpsc::channel::<String>();
-        let (wav_tx, wav_rx) = mpsc::channel::<Vec<u8>>();
+        let (tx, rx) = mpsc::channel::<(u64, String)>();
+        let (wav_tx, wav_rx) = mpsc::channel::<(u64, Vec<u8>)>();
         let speaking = Arc::new(AtomicBool::new(false));
+        let epoch = Arc::new(AtomicU64::new(0));
         let speaking_play = speaking.clone();
+        let epoch_synth = epoch.clone();
+        let epoch_play = epoch.clone();
 
         // Stage 1: Async-capable synthesis worker (synthesizes ahead of playback)
         thread::spawn(move || {
@@ -73,9 +77,15 @@ impl SpeechPipeline {
                 .enable_all()
                 .build()
                 .expect("tts synth runtime");
-            while let Ok(sentence) = rx.recv() {
+            while let Ok((ep, sentence)) = rx.recv() {
+                if ep != epoch_synth.load(Ordering::Relaxed) {
+                    continue;
+                }
                 if let Ok(wav) = rt.block_on(tts.synthesize(&sentence, Some(&voice))) {
-                    if !wav.is_empty() && wav_tx.send(wav).is_err() {
+                    if !wav.is_empty()
+                        && ep == epoch_synth.load(Ordering::Relaxed)
+                        && wav_tx.send((ep, wav)).is_err()
+                    {
                         break;
                     }
                 }
@@ -84,20 +94,30 @@ impl SpeechPipeline {
 
         // Stage 2: Dedicated audio playback worker
         thread::spawn(move || {
-            while let Ok(wav) = wav_rx.recv() {
+            while let Ok((ep, wav)) = wav_rx.recv() {
+                if ep != epoch_play.load(Ordering::Relaxed) {
+                    continue;
+                }
                 speaking_play.store(true, Ordering::Relaxed);
                 let _ = play_wav_bytes(&wav);
                 speaking_play.store(false, Ordering::Relaxed);
             }
         });
 
-        Self { tx, speaking }
+        Self { tx, speaking, epoch }
     }
 
     pub fn enqueue(&self, sentence: String) {
         if !sentence.trim().is_empty() {
-            let _ = self.tx.send(sentence);
+            let ep = self.epoch.load(Ordering::Relaxed);
+            let _ = self.tx.send((ep, sentence));
         }
+    }
+
+    /// Barge-in: immediately invalidates all queued sentences/audio.
+    pub fn interrupt(&self) {
+        self.epoch.fetch_add(1, Ordering::Relaxed);
+        self.speaking.store(false, Ordering::Relaxed);
     }
 
     pub fn is_speaking(&self) -> bool {

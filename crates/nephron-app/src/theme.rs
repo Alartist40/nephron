@@ -25,7 +25,7 @@ pub fn apply_hud_theme(ctx: &egui::Context) {
     v.widgets.active.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(56, 189, 248, 120));
     v.widgets.active.corner_radius = r;
 
-    v.selection.bg_fill = Color32::from_rgba_unmultiplied(56, 189, 248, 60);
-    v.selection.stroke = Stroke::NONE;
+    v.selection.bg_fill = Color32::from_rgba_unmultiplied(56, 189, 248, 68);
+    v.selection.stroke = Stroke::new(1.2_f32, Color32::from_rgb(240, 249, 255));
     ctx.set_visuals(v);
 }

@@ -1,4 +1,4 @@
-//! Fast, pinprick-glitter 3D Brain (MindCorpus style) with mouse-hover glow.
+//! 3D MindCorpus Prismatic Brain — gyri/sulci folding, 7-stop spectrum & regional cognitive lobe illumination.
 
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke};
 use nephron_bridge::MemoryRecord;
@@ -13,33 +13,61 @@ pub enum BrainActivity {
 }
 
 #[derive(Clone, Copy)]
-pub struct BrainPalette {
-    pub primary: [f32; 3],
-    pub secondary: [f32; 3],
-    pub accent: [f32; 3],
-    pub pulse: [f32; 3],
+struct Palette {
+    prismatic: bool,
+    primary: [f32; 3],
+    secondary: [f32; 3],
+    accent: [f32; 3],
+    pulse: [f32; 3],
 }
 
-pub const PALETTES: [BrainPalette; 3] = [
-    BrainPalette {
+const PALETTES: [Palette; 3] = [
+    Palette {
+        prismatic: true,
+        primary: [56.0, 189.0, 248.0],
+        secondary: [192.0, 132.0, 252.0],
+        accent: [255.0, 255.0, 255.0],
+        pulse: [253.0, 224.0, 71.0],
+    },
+    Palette {
+        prismatic: false,
         primary: [56.0, 189.0, 248.0],
         secondary: [129.0, 140.0, 248.0],
-        accent: [235.0, 248.0, 255.0],
-        pulse: [165.0, 232.0, 255.0],
+        accent: [224.0, 242.0, 254.0],
+        pulse: [125.0, 211.0, 252.0],
     },
-    BrainPalette {
-        primary: [192.0, 132.0, 252.0],
-        secondary: [56.0, 189.0, 248.0],
-        accent: [248.0, 224.0, 255.0],
-        pulse: [232.0, 150.0, 255.0],
-    },
-    BrainPalette {
+    Palette {
+        prismatic: false,
         primary: [52.0, 211.0, 153.0],
         secondary: [251.0, 191.0, 36.0],
-        accent: [254.0, 248.0, 220.0],
-        pulse: [130.0, 240.0, 200.0],
+        accent: [254.0, 243.0, 199.0],
+        pulse: [110.0, 231.0, 183.0],
     },
 ];
+
+const MC_STRATA: [[f32; 3]; 7] = [
+    [251.0, 113.0, 133.0], // coral
+    [251.0, 146.0, 60.0],  // amber
+    [250.0, 204.0, 21.0],  // gold
+    [74.0, 222.0, 128.0],  // emerald
+    [34.0, 211.0, 238.0],  // cyan
+    [96.0, 165.0, 250.0],  // cobalt
+    [192.0, 132.0, 252.0], // violet
+];
+
+fn sample_mc_spectrum(t: f32) -> [f32; 3] {
+    let clamped = t.clamp(0.0, 0.9999);
+    let scaled = clamped * (MC_STRATA.len() - 1) as f32;
+    let idx = scaled.floor() as usize;
+    let frac = scaled - idx as f32;
+    let a = MC_STRATA[idx];
+    let b = MC_STRATA[(idx + 1).min(MC_STRATA.len() - 1)];
+    [
+        a[0] + (b[0] - a[0]) * frac,
+        a[1] + (b[1] - a[1]) * frac,
+        a[2] + (b[2] - a[2]) * frac,
+    ]
+}
 
 struct CorticalNode {
     pos: [f32; 3],
@@ -47,7 +75,9 @@ struct CorticalNode {
     phase: f32,
     is_hub: bool,
     mix_ratio: f32,
+    strata_t: f32,
     label: Option<String>,
+    kind_rgb: Option<[f32; 3]>,
 }
 
 struct SynapticPathway {
@@ -71,6 +101,8 @@ pub struct BrainAtlas {
     pub glitter: f32,
     time: f32,
     energy: f32,
+    cog_intensity: f32,
+    speed_boost: f32,
     pub hovered_label: Option<String>,
 }
 
@@ -80,15 +112,17 @@ impl Default for BrainAtlas {
             nodes: Vec::new(),
             pathways: Vec::new(),
             dust: Vec::new(),
-            yaw: -0.35,
-            pitch: 0.08,
+            yaw: 0.45,
+            pitch: 0.14,
             zoom: 1.0,
             auto_rotate: true,
             palette_idx: 0,
             pulse_speed: 1.0,
             glitter: 1.0,
             time: 0.0,
-            energy: 0.0,
+            energy: 0.05,
+            cog_intensity: 0.0,
+            speed_boost: 1.0,
             hovered_label: None,
         };
         atlas.build_anatomy(&[]);
@@ -97,9 +131,10 @@ impl Default for BrainAtlas {
 }
 
 fn hash01(seed: usize, salt: usize) -> f32 {
-    let mut x = (seed as u32).wrapping_mul(747_796_405).wrapping_add(salt as u32 * 2_891_336_453);
-    x = ((x >> ((x >> 28).wrapping_add(4))) ^ x).wrapping_mul(277_803_737);
-    ((x ^ (x >> 22)) & 0x00ff_ffff) as f32 / 16_777_216.0
+    let mut x = (seed.wrapping_mul(747796405)).wrapping_add(salt.wrapping_mul(2891336453)) as u32;
+    x = ((x >> ((x >> 28).wrapping_add(4))) ^ x).wrapping_mul(277803737);
+    x = (x >> 22) ^ x;
+    (x as f32) / (u32::MAX as f32)
 }
 
 impl BrainAtlas {
@@ -108,14 +143,13 @@ impl BrainAtlas {
         self.pathways.clear();
         self.dust.clear();
 
-        // 900 fine pinprick cortical stars (fast 2-tri quads)
-        let count = 900usize;
+        let count = 1500usize;
         for i in 0..count {
             let hemi = if i % 2 == 0 { 1.0f32 } else { -1.0f32 };
             let theta = hash01(i, 1) * TAU;
             let phi = (2.0 * hash01(i, 2) - 1.0).clamp(-1.0, 1.0).acos();
-            let is_surface = hash01(i, 3) > 0.18;
-            let r_base = if is_surface { 0.86 + hash01(i, 4) * 0.14 } else { 0.25 + hash01(i, 4) * 0.6 };
+            let is_surface = hash01(i, 3) > 0.16;
+            let r_base = if is_surface { 0.87 + hash01(i, 4) * 0.13 } else { 0.25 + hash01(i, 4) * 0.6 };
 
             let mut x = phi.sin() * theta.cos() * 1.45;
             let mut y = phi.cos() * 1.32;
@@ -127,55 +161,100 @@ impl BrainAtlas {
                 y *= 1.0 - (z - 0.4) * 0.10;
             }
             if y < 0.05 && y > -0.75 && z > -0.6 && z < 0.65 {
-                x += x.signum() * 0.24 * (((z + 0.6) / 1.25) * PI).sin();
+                x += x.signum() * 0.25 * (((z + 0.6) / 1.25) * PI).sin();
                 y -= 0.14;
             }
             if z < -0.65 && y < -0.15 {
                 x *= 0.78;
-                y -= 0.25;
+                y -= 0.26;
                 z *= 0.92;
             }
 
-            let fold_freq = 6.5;
-            let folding = (x * fold_freq + z * 4.0).sin() * (y * fold_freq - z * 3.5).cos() * 0.065;
-            let radial = r_base + if is_surface { folding } else { 0.0 };
+            // Multi-harmonic gyri/sulci cortical folding
+            let primary_fold = (x * 6.8 + z * 4.2).sin() * (y * 6.8 - z * 3.6).cos() * 0.068;
+            let fine_sulci = (x * 13.5 - y * 11.0 + z * 9.0).sin() * 0.022;
+            let radial = r_base + if is_surface { primary_fold + fine_sulci } else { 0.0 };
             x *= radial;
             y *= radial;
             z *= radial;
 
-            let medial_gap = 0.08 + 0.06 * y.max(0.0);
+            let medial_gap = 0.085 + 0.065 * y.max(0.0);
             x = x.abs() * hemi + hemi * medial_gap;
 
-            let is_hub = hash01(i, 5) > 0.96;
-            let size = if is_hub { 1.6 + hash01(i, 6) * 1.1 } else { 0.65 + hash01(i, 6) * 0.65 };
+            let is_hub = hash01(i, 5) > 0.925;
+            let size = if is_hub { 2.6 + hash01(i, 6) * 2.0 } else { 0.85 + hash01(i, 6) * 1.35 };
+            let strata_t = ((y + 1.1) * 0.34 + (z + 1.9) * 0.14 + (x * 2.5).sin() * 0.08).clamp(0.0, 0.9999);
+            let (label, kind_rgb) = if is_hub && !memories.is_empty() {
+                let m = &memories[i % memories.len()];
+                let kcol = match m.kind.as_str() {
+                    "cad" => [52.0, 211.0, 153.0],
+                    "voice" => [251.0, 113.0, 133.0],
+                    "web" => [192.0, 132.0, 252.0],
+                    _ => [250.0, 204.0, 21.0],
+                };
+                (Some(m.content.chars().take(48).collect()), Some(kcol))
+            } else {
+                (None, None)
+            };
+
             self.nodes.push(CorticalNode {
-                pos: [x, -y, z],
+                pos: [x, y, z],
                 size,
                 phase: hash01(i, 7) * TAU,
                 is_hub,
                 mix_ratio: ((z + 2.0) / 4.0).clamp(0.0, 1.0),
-                label: None,
+                strata_t,
+                label,
+                kind_rgb,
             });
         }
 
-        for (idx, mem) in memories.iter().take(40).enumerate() {
-            if let Some(n) = self.nodes.get_mut((idx * 47) % count) {
-                n.is_hub = true;
-                n.size = 2.4;
-                n.label = Some(format!("[{}] {}", mem.kind, mem.content));
+        // Keyword-linked synaptic edges between memory hubs
+        let hubs: Vec<(usize, String)> = self
+            .nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, n)| n.label.as_ref().map(|l| (idx, l.to_lowercase())))
+            .take(24)
+            .collect();
+        for a_i in 0..hubs.len() {
+            for b_i in (a_i + 1)..hubs.len() {
+                let share_kw = hubs[a_i]
+                    .1
+                    .split(|c: char| !c.is_alphanumeric())
+                    .any(|w| w.len() >= 4 && hubs[b_i].1.contains(w));
+                if share_kw {
+                    let a = self.nodes[hubs[a_i].0].pos;
+                    let b = self.nodes[hubs[b_i].0].pos;
+                    let mid = [(a[0] + b[0]) * 0.4, (a[1] + b[1]) * 0.4, (a[2] + b[2]) * 0.4];
+                    let mut pts = [[0.0f32; 3]; 8];
+                    for (s, pt) in pts.iter_mut().enumerate() {
+                        let t = s as f32 / 7.0;
+                        let u = 1.0 - t;
+                        for k in 0..3 {
+                            pt[k] = u * u * a[k] + 2.0 * u * t * mid[k] + t * t * b[k];
+                        }
+                    }
+                    self.pathways.push(SynapticPathway {
+                        pts,
+                        progress: 0.2,
+                        speed: 0.45,
+                        active: true,
+                        cooldown: 0.3,
+                    });
+                }
             }
         }
 
-        // 90 delicate curved Bezier synaptic pathways (8 points each = fast & smooth)
         for i in 0..90 {
             let idx_a = (hash01(i, 10) * count as f32) as usize % count;
-            let mut idx_b = (hash01(i, 11) * count as f32) as usize % count;
-            let want_cross = i % 4 == 0;
             let a = self.nodes[idx_a].pos;
+            let want_cross = hash01(i, 11) > 0.72;
+            let mut idx_b = (idx_a + 13) % count;
             for attempt in 0..20 {
                 let cand = (hash01(i * 31 + attempt, 12) * count as f32) as usize % count;
                 let b = self.nodes[cand].pos;
-                let d = ((a[0]-b[0]).powi(2) + (a[1]-b[1]).powi(2) + (a[2]-b[2]).powi(2)).sqrt();
+                let d = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
                 let same_hemi = a[0].signum() == b[0].signum();
                 if (!want_cross && same_hemi && d > 0.45 && d < 1.55)
                     || (want_cross && !same_hemi && d > 0.5 && d < 1.8)
@@ -204,7 +283,7 @@ impl BrainAtlas {
             });
         }
 
-        for i in 0..140 {
+        for i in 0..120 {
             let r = 3.2 + hash01(i, 20) * 3.5;
             let th = hash01(i, 21) * TAU;
             let ph = (2.0 * hash01(i, 22) - 1.0).acos();
@@ -213,11 +292,10 @@ impl BrainAtlas {
     }
 
     pub fn trigger_cascade(&mut self) {
-        for (i, p) in self.pathways.iter_mut().enumerate() {
-            if hash01(i, 99) > 0.3 {
+        for p in &mut self.pathways {
+            if !p.active {
                 p.active = true;
-                p.progress = hash01(i, 98) * 0.2;
-                p.speed = 0.75 + hash01(i, 97) * 0.5;
+                p.progress = 0.0;
             }
         }
     }
@@ -231,7 +309,7 @@ impl BrainAtlas {
             self.pitch = (self.pitch + d.y * 0.006).clamp(-1.35, 1.35);
             interacting = true;
         } else if self.auto_rotate {
-            self.yaw += dt * (0.14 + self.energy * 0.25);
+            self.yaw += dt * (0.14 + self.energy * 0.22);
         }
         let clicked_label = if resp.clicked() {
             self.trigger_cascade();
@@ -245,14 +323,18 @@ impl BrainAtlas {
             interacting = true;
         }
 
-        self.energy += (raw_energy.clamp(0.0, 1.0) - self.energy) * (1.0 - (-dt / 0.14).exp());
-        let act_mul = match activity {
-            BrainActivity::Idle => 1.0,
-            BrainActivity::Listening => 1.6 + self.energy,
-            BrainActivity::Thinking => 2.0,
-            BrainActivity::Speaking => 2.2 + self.energy,
+        // Cognitive State Engine: smooth lobe illumination & synaptic velocity
+        let (target_int, target_boost, focus_a, col_a, focus_b, col_b) = match activity {
+            BrainActivity::Idle => (0.0, 1.0, [0.0, 0.3, 0.8], [56.0, 189.0, 248.0], [0.0, -0.2, -0.8], [192.0, 132.0, 252.0]),
+            BrainActivity::Listening => (0.85, 1.9, [1.05, -0.15, 0.25], [251.0, 113.0, 133.0], [-1.05, -0.15, 0.25], [251.0, 146.0, 60.0]),
+            BrainActivity::Thinking => (1.35, 2.8, [0.0, 0.55, 1.25], [56.0, 189.0, 248.0], [0.0, 0.65, -0.65], [192.0, 132.0, 252.0]),
+            BrainActivity::Speaking => (1.1, 2.1, [-0.85, 0.25, 0.85], [52.0, 211.0, 153.0], [0.75, 0.15, 0.75], [250.0, 204.0, 21.0]),
         };
-        self.time += dt * act_mul;
+        let lerp_k = 1.0 - (-dt * 4.5).exp();
+        self.cog_intensity += (target_int - self.cog_intensity) * lerp_k;
+        self.speed_boost += (target_boost - self.speed_boost) * lerp_k;
+        self.energy += (raw_energy.clamp(0.0, 1.0) - self.energy) * (1.0 - (-dt / 0.14).exp());
+        self.time += dt * (1.0 + self.energy * 0.8) * self.speed_boost;
 
         let painter = ui.painter_at(rect);
         let pal = PALETTES[self.palette_idx % PALETTES.len()];
@@ -266,25 +348,28 @@ impl BrainAtlas {
             let ry = y * cp - rz0 * sp;
             let rz = y * sp + rz0 * cp;
             let persp = 6.8 / (6.8 - rz).max(1.0);
-            (Pos2::new(center.x + rx * scale * persp, center.y + ry * scale * persp), ((rz + 2.0) / 4.0).clamp(0.05, 1.0))
+            (Pos2::new(center.x + rx * scale * persp, center.y - ry * scale * persp), ((rz + 2.0) / 4.0).clamp(0.05, 1.0))
         };
 
-        // 1. Deep-space dust (fast 1.5px squares)
+        // 1. Deep-space dust (no solid disc behind brain so the cortical silhouette stays crisp)
         for d in &self.dust {
             let (p, _) = project(*d);
-            painter.rect_filled(Rect::from_center_size(p, egui::vec2(1.4, 1.4)), 0.0, Color32::from_rgba_unmultiplied(148, 163, 184, 42));
+            if rect.contains(p) {
+                painter.rect_filled(Rect::from_center_size(p, egui::vec2(1.4, 1.4)), 0.0, Color32::from_rgba_unmultiplied(148, 163, 184, 38));
+            }
         }
 
-        // 2. Whisper-thin curved Bezier synaptic pathways + bright traveling pulse heads
+        // 2. Curved Bezier synaptic pathways + traveling pulse heads
+        let path_speed_mul = self.pulse_speed * self.speed_boost;
         for p in &mut self.pathways {
             if p.active {
-                p.progress += dt * p.speed * self.pulse_speed * act_mul;
+                p.progress += dt * p.speed * path_speed_mul;
                 if p.progress >= 1.25 {
                     p.active = false;
-                    p.cooldown = 0.6;
+                    p.cooldown = 0.55;
                 }
             } else {
-                p.cooldown -= dt * self.pulse_speed;
+                p.cooldown -= dt * path_speed_mul;
                 if p.cooldown <= 0.0 {
                     p.active = true;
                     p.progress = 0.0;
@@ -302,7 +387,12 @@ impl BrainAtlas {
                         alpha += (1.0 - dist / 0.24) * 0.55;
                     }
                 }
-                let col = lerp_rgb(pal.secondary, pal.primary, seg_t, (alpha * 255.0) as u8);
+                let base_col = if pal.prismatic {
+                    sample_mc_spectrum(seg_t)
+                } else {
+                    pal.primary
+                };
+                let col = lerp_rgb(pal.secondary, base_col, seg_t, (alpha * 255.0) as u8);
                 painter.line_segment([prev, cur], Stroke::new(if alpha > 0.16 { 1.1_f32 } else { 0.55_f32 }, col));
                 prev = cur;
             }
@@ -313,12 +403,12 @@ impl BrainAtlas {
                 let p0 = project(p.pts[idx.min(7)]).0;
                 let p1 = project(p.pts[(idx + 1).min(7)]).0;
                 let head = p0.lerp(p1, frac);
-                painter.circle_filled(head, 3.0, Color32::from_rgba_unmultiplied(pal.pulse[0] as u8, pal.pulse[1] as u8, pal.pulse[2] as u8, 55));
-                painter.rect_filled(Rect::from_center_size(head, egui::vec2(2.2, 2.2)), 1.0, Color32::from_rgb(240, 250, 255));
+                painter.circle_filled(head, 3.0, Color32::from_rgba_unmultiplied(pal.pulse[0] as u8, pal.pulse[1] as u8, pal.pulse[2] as u8, 60));
+                painter.rect_filled(Rect::from_center_size(head, egui::vec2(2.2, 2.2)), 0.0, Color32::from_rgb(240, 250, 255));
             }
         }
 
-        // 3. Fast pinprick glitter stars + live mouse-hover glow
+        // 3. Cortical glitter stars + regional cognitive lobe illumination
         let pointer = ui.input(|i| i.pointer.hover_pos());
         self.hovered_label = None;
         for n in &self.nodes {
@@ -326,9 +416,9 @@ impl BrainAtlas {
             if !rect.contains(p) {
                 continue;
             }
-            let sparkle = 0.55 + 0.45 * (self.time * 2.8 + n.phase * 3.0).sin();
-            let flash = if (self.time * 1.9 + n.phase * 7.0).sin() > 0.85 {
-                (self.time * 1.9 + n.phase * 7.0).sin().powi(6) * 1.6
+            let sparkle = 0.55 + 0.45 * (self.time * 2.6 + n.phase * 3.0).sin();
+            let flash = if (self.time * 1.8 + n.phase * 7.0).sin() > 0.86 {
+                (self.time * 1.8 + n.phase * 7.0).sin().powi(6) * 1.5
             } else {
                 0.0
             };
@@ -337,16 +427,43 @@ impl BrainAtlas {
                 .map(|ptr| (1.0 - p.distance(ptr) / 72.0).max(0.0).powi(2) * 1.6)
                 .unwrap_or(0.0);
 
-            let alpha = ((0.22 + sparkle * 0.35 + flash * 0.45 + hover_boost * 0.55) * depth * self.glitter).clamp(0.06, 1.0);
-            let sz = n.size * (0.65 + depth * 0.4 + flash * 0.35 + hover_boost * 0.85) * self.glitter.min(1.4);
+            let (reg_a, reg_b) = if self.cog_intensity > 0.02 {
+                let da = dist3(n.pos, focus_a);
+                let db = dist3(n.pos, focus_b);
+                let wa = 0.65 + 0.35 * (self.time * 4.5 + n.pos[2] * 2.5).sin();
+                let wb = 0.65 + 0.35 * (self.time * 3.8 - n.pos[0] * 2.5).cos();
+                (
+                    ((1.45 - da) / 1.45).clamp(0.0, 1.0) * self.cog_intensity * wa,
+                    ((1.35 - db) / 1.35).clamp(0.0, 1.0) * self.cog_intensity * wb,
+                )
+            } else {
+                (0.0, 0.0)
+            };
 
-            let mut c = lerp_rgb(pal.primary, pal.secondary, n.mix_ratio, (alpha * 255.0) as u8);
-            if n.is_hub || flash > 0.6 || hover_boost > 0.25 {
-                let k = (if n.is_hub { 0.65 } else { 0.0 } + flash * 0.35 + hover_boost * 0.55).min(1.0);
-                c = lerp_rgb([c.r() as f32, c.g() as f32, c.b() as f32], pal.accent, k, (alpha * 255.0) as u8);
+            let alpha = ((0.24 + sparkle * 0.34 + flash * 0.42 + hover_boost * 0.5 + (reg_a + reg_b) * 0.35) * depth * self.glitter).clamp(0.06, 1.0);
+            let sz = n.size * (0.65 + depth * 0.4 + flash * 0.3 + hover_boost * 0.8 + (reg_a + reg_b) * 0.35) * self.glitter.min(1.4);
+
+            let mut rgb = if pal.prismatic {
+                sample_mc_spectrum(n.strata_t)
+            } else {
+                lerp_rgb_raw(pal.primary, pal.secondary, n.mix_ratio)
+            };
+            if let Some(krgb) = n.kind_rgb {
+                rgb = lerp_rgb_raw(rgb, krgb, 0.72);
+            } else if n.is_hub || flash > 0.6 || hover_boost > 0.25 {
+                let k = (if n.is_hub { 0.58 } else { 0.0 } + flash * 0.32 + hover_boost * 0.55).min(1.0);
+                rgb = lerp_rgb_raw(rgb, pal.accent, k);
             }
-            if hover_boost > 0.3 || (n.is_hub && flash > 0.8) {
-                painter.circle_filled(p, sz * 2.4, Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (alpha * 42.0) as u8));
+            if reg_a > 0.05 {
+                rgb = lerp_rgb_raw(rgb, col_a, (reg_a * 0.85).min(1.0));
+            }
+            if reg_b > 0.05 {
+                rgb = lerp_rgb_raw(rgb, col_b, (reg_b * 0.80).min(1.0));
+            }
+
+            let c = Color32::from_rgba_unmultiplied(rgb[0] as u8, rgb[1] as u8, rgb[2] as u8, (alpha * 255.0) as u8);
+            if hover_boost > 0.3 || (n.is_hub && (flash > 0.8 || reg_a + reg_b > 0.55)) {
+                painter.circle_filled(p, sz * 2.2, Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (alpha * 42.0) as u8));
             }
             painter.rect_filled(Rect::from_center_size(p, egui::vec2(sz, sz)), 0.0, c);
 
@@ -370,12 +487,16 @@ impl BrainAtlas {
     }
 }
 
-fn lerp_rgb(a: [f32; 3], b: [f32; 3], t: f32, alpha: u8) -> Color32 {
+fn dist3(a: [f32; 3], b: [f32; 3]) -> f32 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+}
+
+fn lerp_rgb_raw(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let k = t.clamp(0.0, 1.0);
-    Color32::from_rgba_unmultiplied(
-        (a[0] + (b[0] - a[0]) * k) as u8,
-        (a[1] + (b[1] - a[1]) * k) as u8,
-        (a[2] + (b[2] - a[2]) * k) as u8,
-        alpha,
-    )
+    [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]
+}
+
+fn lerp_rgb(a: [f32; 3], b: [f32; 3], t: f32, alpha: u8) -> Color32 {
+    let r = lerp_rgb_raw(a, b, t);
+    Color32::from_rgba_unmultiplied(r[0] as u8, r[1] as u8, r[2] as u8, alpha)
 }

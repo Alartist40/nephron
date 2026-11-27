@@ -39,12 +39,29 @@ impl WebSearcher {
     }
 
     pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
-        if let Ok(hits) = self.search_searxng(query, limit).await {
-            if !hits.is_empty() {
-                return Ok(hits);
+        let mut hits = match self.search_searxng(query, limit).await {
+            Ok(h) if !h.is_empty() => h,
+            _ => self.search_ddg(query, limit).await?,
+        };
+        // Full-page reader: enrich top 2 results with clean article excerpts concurrently
+        let urls: Vec<String> = hits.iter().take(2).map(|h| h.url.clone()).collect();
+        let mut fetches = Vec::new();
+        for url in urls {
+            let client = self.http.clone();
+            fetches.push(tokio::spawn(async move {
+                fetch_page_excerpt(&client, &url).await
+            }));
+        }
+        for (i, fut) in fetches.into_iter().enumerate() {
+            if let Ok(Some(excerpt)) = fut.await {
+                if let Some(hit) = hits.get_mut(i) {
+                    if !excerpt.is_empty() {
+                        hit.snippet = excerpt;
+                    }
+                }
             }
         }
-        self.search_ddg(query, limit).await
+        Ok(hits)
     }
 
     async fn search_searxng(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
@@ -109,6 +126,41 @@ pub fn parse_ddg_html(html: &str, limit: usize) -> Vec<SearchResult> {
 
 fn is_safe_http_url(url: &str) -> bool {
     url.starts_with("https://") || url.starts_with("http://")
+}
+
+async fn fetch_page_excerpt(client: &reqwest::Client, url: &str) -> Option<String> {
+    if !is_safe_http_url(url) {
+        return None;
+    }
+    let resp = client
+        .get(url)
+        .timeout(Duration::from_millis(2500))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let html = resp.text().await.ok()?;
+    let cleaned = strip_script_style_and_tags(&html);
+    let excerpt: String = cleaned.chars().take(520).collect();
+    (!excerpt.is_empty()).then_some(excerpt)
+}
+
+fn strip_script_style_and_tags(html: &str) -> String {
+    let mut s = html.to_string();
+    for tag in ["script", "style", "nav", "header", "footer"] {
+        let open = format!("<{tag}");
+        let close = format!("</{tag}>");
+        while let Some(a) = s.to_lowercase().find(&open) {
+            if let Some(b_rel) = s[a..].to_lowercase().find(&close) {
+                s.replace_range(a..a + b_rel + close.len(), " ");
+            } else {
+                break;
+            }
+        }
+    }
+    strip_tags(&s)
 }
 
 pub fn format_citations_prompt(query: &str, results: &[SearchResult]) -> String {

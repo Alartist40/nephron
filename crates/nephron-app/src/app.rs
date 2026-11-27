@@ -1,8 +1,8 @@
-//! Full-window 3D Brain Atlas + `gods-eye-view` OS-style bottom command dock.
+//! Kinetic Neural Canvas UI — MindCorpus 3D Brain, Kinetic Pill Dock, Living Bubble Head & CAD Studio.
 
 use crate::brain::{BrainActivity, BrainAtlas};
 use crate::overlays::{set_pet_mood_hint, OverlayChild};
-use eframe::egui::{self, Align2, Color32, Frame, Stroke};
+use eframe::egui::{self, Align2, Color32, Frame, Pos2, Rect, Stroke};
 use nephron_bridge::{
     format_citations_prompt, BackendKind, CadPart, ChatMessage, ChatRole, CynapseClient,
     EffortLevel, MemoryRecord, MemoryStore, ModelProfile, SearchResult, StreamEvent,
@@ -10,30 +10,40 @@ use nephron_bridge::{
 };
 use nephron_cad::{
     cad_repair_prompt, compile_cad_bundle, parse_cad_bundle, sanitize_part_name, CadDesign,
-    CadViewport, CAD_SYSTEM_PROMPT,
+    CadViewport, CvGestureTracker, CAD_SYSTEM_PROMPT,
 };
 use nephron_pets::PetSpecies;
 use nephron_swarm::actions::{execute_action, ComputerAction};
 use nephron_voice::{
-    audio::SAMPLE_RATE, encode_pcm16_wav,
+    audio::SAMPLE_RATE, encode_pcm16_wav, transcribe_wav_local,
     tts::{DEFAULT_TTS_URL, DEFAULT_VOICE},
     wav_to_base64, AudioCapture, PocketTtsClient, PocketTtsSidecar, SentenceBuffer, SpeechPipeline,
+    VadState,
 };
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
-#[derive(Default)]
-struct DockState {
-    chat: bool,
-    brain: bool,
-    cad: bool,
-    backend: bool,
-    pet_menu: bool,
-    pet: bool,
-    swarm: bool,
-    web: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrawerTab {
+    Bridge,
+    Memory,
+    Cad,
+    Agents,
+    Cortex,
+}
+
+impl DrawerTab {
+    fn slot_index(self) -> usize {
+        match self {
+            Self::Bridge => 0,
+            Self::Memory => 1,
+            Self::Cad => 2,
+            Self::Agents => 3,
+            Self::Cortex => 4,
+        }
+    }
 }
 
 pub struct NephronApp {
@@ -46,7 +56,15 @@ pub struct NephronApp {
     store: MemoryStore,
     model: ModelProfile,
     effort: EffortLevel,
-    dock: DockState,
+    active_tab: Option<DrawerTab>,
+    bubble_open: bool,
+    web_mode: bool,
+    inject_pinned: bool,
+    auto_vad: bool,
+    vad_was_speech: bool,
+    pet_active: bool,
+    swarm_active: bool,
+    pill_x: Option<f32>,
     messages: Vec<ChatMessage>,
     input: String,
     memory_query: String,
@@ -76,10 +94,13 @@ pub struct NephronApp {
     cad_rx: Option<mpsc::UnboundedReceiver<StreamEvent>>,
     cad_buf: String,
     cad_repairs: u8,
+    cad_prompt: String,
+    cv_gesture: Option<CvGestureTracker>,
     brain: BrainAtlas,
     searcher: WebSearcher,
     web_sources: Vec<SearchResult>,
     web_rx: Option<mpsc::UnboundedReceiver<(String, Vec<SearchResult>)>>,
+    ui_time: f32,
 }
 
 impl NephronApp {
@@ -87,7 +108,7 @@ impl NephronApp {
         let tts_url = std::env::var("NEPHRON_TTS_URL").unwrap_or_else(|_| DEFAULT_TTS_URL.into());
         let _tts_sidecar = PocketTtsSidecar::spawn(8000, DEFAULT_VOICE);
         let tts = PocketTtsClient::new(tts_url).expect("valid pocket-tts url");
-        let speech = SpeechPipeline::spawn(tts.clone(), DEFAULT_VOICE.into());
+        let speech = SpeechPipeline::spawn(tts, DEFAULT_VOICE.into());
         let cad_parts = store.list_parts().unwrap_or_default();
         let memories = store.recent_memories(40).unwrap_or_default();
         let mut brain = BrainAtlas::default();
@@ -102,7 +123,15 @@ impl NephronApp {
             store,
             model: ModelProfile::MiniCpm5_1B,
             effort: EffortLevel::Auto,
-            dock: DockState { chat: true, ..Default::default() },
+            active_tab: None,
+            bubble_open: true,
+            web_mode: false,
+            inject_pinned: true,
+            auto_vad: false,
+            vad_was_speech: false,
+            pet_active: false,
+            swarm_active: false,
+            pill_x: None,
             messages: vec![ChatMessage {
                 role: ChatRole::Assistant,
                 content: "Nephron neural workspace ready.".into(),
@@ -135,12 +164,16 @@ impl NephronApp {
             cad_rx: None,
             cad_buf: String::new(),
             cad_repairs: 0,
+            cad_prompt: String::new(),
+            cv_gesture: None,
             brain,
             searcher: WebSearcher::default(),
             web_sources: Vec::new(),
             web_rx: None,
+            ui_time: 0.0,
         };
         app.poll_system();
+        set_pet_mood_hint("idle");
         app
     }
 
@@ -152,7 +185,7 @@ impl NephronApp {
             if kind == BackendKind::Ollama {
                 self.refresh_ollama();
             }
-            if self.dock.pet {
+            if self.pet_active {
                 self.pet_proc.kill();
             }
         }
@@ -197,30 +230,54 @@ impl NephronApp {
             return;
         }
         self.input.clear();
+        self.dispatch_prompt(prompt);
+    }
+
+    fn dispatch_prompt(&mut self, prompt: String) {
         let lower = prompt.to_lowercase();
-        let cad_intent = (self.dock.cad && !self.dock.web)
-            || lower.starts_with("build ")
-            || lower.starts_with("design ")
-            || lower.starts_with("cad:")
-            || lower.starts_with("3d model ")
-            || lower.contains("3d print");
+        if lower.starts_with("cua:") || lower == "open terminal" || lower == "take screenshot" {
+            self.bubble_open = true;
+            let res = if lower.contains("terminal") {
+                execute_action(&ComputerAction::LaunchApp("gnome-terminal".into()))
+            } else if lower.contains("screenshot") {
+                execute_action(&ComputerAction::CaptureScreen(std::env::temp_dir().join("nephron_cua.png")))
+            } else {
+                execute_action(&ComputerAction::Notify {
+                    title: "Nephron CUA".into(),
+                    body: prompt.trim_start_matches("cua:").trim().into(),
+                })
+            };
+            let msg = res.unwrap_or_else(|e| format!("CUA error: {e}"));
+            self.messages.push(ChatMessage { role: ChatRole::User, content: prompt });
+            self.messages.push(ChatMessage { role: ChatRole::Assistant, content: msg });
+            return;
+        }
+        let web_intent = self.web_mode
+            || lower.starts_with("search ")
+            || lower.starts_with("research ")
+            || lower.starts_with("look up ")
+            || lower.contains("latest news");
+        let cad_intent = !web_intent
+            && ((self.active_tab == Some(DrawerTab::Cad))
+                || lower.contains("build ")
+                || lower.contains("design ")
+                || lower.contains("cad")
+                || lower.contains("3d model")
+                || lower.contains("3d print")
+                || lower.contains("make a 3d")
+                || lower.contains("create a 3d"));
         if cad_intent {
-            self.dock.cad = true;
-            self.dock.chat = true;
+            self.active_tab = Some(DrawerTab::Cad);
+            self.bubble_open = true;
             let _ = self.store.save_memory("cad", &prompt);
             self.sync_brain();
             self.messages.push(ChatMessage { role: ChatRole::User, content: prompt.clone() });
             self.generate_cad(prompt);
             return;
         }
-        let web_intent = self.dock.web
-            || lower.starts_with("search ")
-            || lower.starts_with("research ")
-            || lower.starts_with("look up ")
-            || lower.contains("latest news");
         let _ = self.store.save_memory("user", &prompt);
         self.sync_brain();
-        self.dock.chat = true;
+        self.bubble_open = true;
         self.messages.push(ChatMessage { role: ChatRole::User, content: prompt.clone() });
         self.messages.push(ChatMessage { role: ChatRole::Assistant, content: String::new() });
 
@@ -249,6 +306,24 @@ impl NephronApp {
         let model_id = self.active_model_id();
         let effort = self.effort;
         let mut history = self.messages[..self.messages.len() - 1].to_vec();
+        if self.inject_pinned {
+            let pinned_lines: Vec<String> = self
+                .memory_hits
+                .iter()
+                .filter(|m| m.pinned)
+                .take(6)
+                .map(|m| format!("- [{}] {}", m.kind, m.content))
+                .collect();
+            if !pinned_lines.is_empty() {
+                history.insert(
+                    0,
+                    ChatMessage {
+                        role: ChatRole::System,
+                        content: format!("Pinned user memory:\n{}", pinned_lines.join("\n")),
+                    },
+                );
+            }
+        }
         if let Some(c) = web_ctx {
             history.insert(history.len().saturating_sub(1), ChatMessage { role: ChatRole::System, content: c });
         }
@@ -259,12 +334,20 @@ impl NephronApp {
 
     fn toggle_mic(&mut self) {
         if let Some(cap) = self.capture.take() {
+            self.vad_was_speech = false;
             let samples = cap.stop();
             if !samples.is_empty() && !self.streaming {
-                let b64 = wav_to_base64(&encode_pcm16_wav(&samples, SAMPLE_RATE));
+                let wav = encode_pcm16_wav(&samples, SAMPLE_RATE);
+                if let Some(text) = transcribe_wav_local(&wav) {
+                    let _ = self.store.save_memory("voice", &text);
+                    self.sync_brain();
+                    self.dispatch_prompt(text);
+                    return;
+                }
+                let b64 = wav_to_base64(&wav);
                 let _ = self.store.save_memory("voice", "[voice audio prompt]");
                 self.sync_brain();
-                self.dock.chat = true;
+                self.bubble_open = true;
                 self.messages.push(ChatMessage { role: ChatRole::User, content: "[Voice prompt]".into() });
                 self.messages.push(ChatMessage { role: ChatRole::Assistant, content: String::new() });
                 let (tx, rx) = mpsc::unbounded_channel();
@@ -281,6 +364,7 @@ impl NephronApp {
                 });
             }
         } else if !self.streaming {
+            self.speech.interrupt();
             if let Ok(cap) = AudioCapture::start() {
                 self.capture = Some(cap);
             }
@@ -311,10 +395,7 @@ impl NephronApp {
                 dims[2],
                 self.cad_viewport.backend_label
             );
-            self.messages.push(ChatMessage {
-                role: ChatRole::Assistant,
-                content: summary.clone(),
-            });
+            self.messages.push(ChatMessage { role: ChatRole::Assistant, content: summary });
             if self.auto_tts {
                 self.speech.enqueue(format!(
                     "Built {}, {} by {} by {} millimeters.",
@@ -349,13 +430,10 @@ impl NephronApp {
             return;
         }
         self.cad_repairs = 0;
+        self.cad_prompt = desc.to_lowercase();
         self.cad_design = None;
         self.cad_scad.clear();
-        let slug: String = sanitize_part_name(&desc)
-            .chars()
-            .take(28)
-            .collect();
-        self.cad_part_name = slug.to_lowercase();
+        self.cad_part_name = sanitize_part_name(&desc).chars().take(28).collect::<String>().to_lowercase();
         self.cad_viewport.backend_label = "designing...".into();
         self.messages.push(ChatMessage {
             role: ChatRole::Assistant,
@@ -463,7 +541,22 @@ impl NephronApp {
                     StreamEvent::Done { .. } => {
                         let parsed = parse_cad_bundle(&self.cad_buf);
                         let valid_err = match &parsed.design {
-                            Some(d) => d.validate().err().map(|e| e.to_string()),
+                            Some(d) => {
+                                if let Err(e) = d.validate() {
+                                    Some(e.to_string())
+                                } else {
+                                    let only_boxes = d.parts.iter().all(|p| p.primitives.iter().all(|pr| pr.kind == "box"));
+                                    if only_boxes && self.cad_prompt.contains("pyramid") {
+                                        Some("user requested a pyramid: use kind=\"pyramid\" with size=[40,40,40], NOT box".into())
+                                    } else if only_boxes && self.cad_prompt.contains("cone") {
+                                        Some("user requested a cone: use kind=\"cone\" with size=[20,0,40], NOT box".into())
+                                    } else if only_boxes && self.cad_prompt.contains("sphere") {
+                                        Some("user requested a sphere: use kind=\"sphere\" with size=[20,20,20], NOT box".into())
+                                    } else {
+                                        None
+                                    }
+                                }
+                            }
                             None if parsed.scad.is_none() => Some("missing CadDesign JSON".into()),
                             None => None,
                         };
@@ -510,80 +603,115 @@ impl NephronApp {
     }
 }
 
-fn hud_frame() -> Frame {
+fn kinetic_glass() -> Frame {
     Frame::NONE
-        .fill(Color32::from_rgba_unmultiplied(10, 14, 24, 198))
+        .fill(Color32::from_rgba_unmultiplied(10, 14, 24, 200))
         .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 28)))
-        .corner_radius(16.0)
+        .corner_radius(20.0)
         .inner_margin(12.0)
 }
 
-fn dock_frame() -> Frame {
+fn kinetic_dock_frame() -> Frame {
     Frame::NONE
-        .fill(Color32::from_rgba_unmultiplied(12, 16, 28, 185))
-        .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 30)))
-        .corner_radius(18.0)
-        .inner_margin(egui::Margin::symmetric(12, 8))
+        .fill(Color32::from_rgba_unmultiplied(11, 15, 25, 190))
+        .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 28)))
+        .corner_radius(26.0)
+        .inner_margin(egui::Margin::symmetric(8, 6))
 }
 
-fn dock_icon(ui: &mut egui::Ui, active: bool, icon: &str, tip: &str, tint: Color32) -> bool {
-    let fill = if active {
-        Color32::from_rgba_unmultiplied(56, 189, 248, 48)
+fn kinetic_icon(ui: &mut egui::Ui, id: &str, active: bool, icon: &str, tip: &str, tint: Color32) -> (bool, Pos2) {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(38.0, 38.0), egui::Sense::click());
+    let hover_t = ui.ctx().animate_bool(egui::Id::new(id).with("hov"), resp.hovered());
+    let press_t = ui.ctx().animate_bool(egui::Id::new(id).with("prs"), resp.is_pointer_button_down_on());
+    let lift = hover_t * 3.0 - press_t * 1.5;
+    let size = 16.5 + hover_t * 2.5 - press_t * 1.5;
+    let col = if active || hover_t > 0.2 {
+        tint
     } else {
-        Color32::from_rgba_unmultiplied(255, 255, 255, 10)
+        Color32::from_rgba_unmultiplied(tint.r(), tint.g(), tint.b(), 195)
     };
-    let stroke = if active {
-        Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(56, 189, 248, 110))
-    } else {
-        Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 24))
-    };
-    let btn = egui::Button::new(egui::RichText::new(icon).size(18.0).color(tint))
-        .fill(fill)
-        .stroke(stroke)
-        .corner_radius(12.0)
-        .min_size(egui::vec2(42.0, 42.0));
-    let resp = ui.add(btn).on_hover_text(tip);
-    if active {
-        let dot_pos = egui::pos2(resp.rect.center().x, resp.rect.bottom() + 3.0);
-        ui.painter().circle_filled(dot_pos, 2.0, Color32::from_rgb(56, 189, 248));
+    if hover_t > 0.02 && !active {
+        ui.painter().circle_filled(
+            rect.center(),
+            17.0 + hover_t * 2.0,
+            Color32::from_rgba_unmultiplied(255, 255, 255, (hover_t * 18.0) as u8),
+        );
     }
-    resp.clicked()
+    ui.painter().text(
+        Pos2::new(rect.center().x, rect.center().y - lift),
+        egui::Align2::CENTER_CENTER,
+        icon,
+        egui::FontId::proportional(size),
+        col,
+    );
+    let clicked = resp.on_hover_text(tip).clicked();
+    (clicked, rect.center())
 }
 
 impl eframe::App for NephronApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let dt = ctx.input(|i| i.stable_dt).min(0.05);
+        self.ui_time += dt;
         if self.last_poll.elapsed() >= Duration::from_secs(3) {
             self.poll_system();
         }
         if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::M)) {
             self.toggle_mic();
         }
+        // Auto-VAD hands-free turn-taking & Barge-In interrupt
+        if let Some(cap) = &self.capture {
+            let vst = cap.current_vad();
+            if vst == VadState::Speech {
+                self.vad_was_speech = true;
+                if self.speech.is_speaking() {
+                    self.speech.interrupt();
+                }
+            } else if self.auto_vad && self.vad_was_speech && vst == VadState::Silence {
+                self.toggle_mic();
+            }
+        }
+        if let Some(cv) = &self.cv_gesture {
+            let d = cv.take_delta();
+            if d.active {
+                self.cad_viewport.yaw += d.d_yaw;
+                self.cad_viewport.pitch = (self.cad_viewport.pitch + d.d_pitch).clamp(-1.4, 1.4);
+                self.cad_viewport.zoom = (self.cad_viewport.zoom + d.d_zoom).clamp(0.5, 10.0);
+                ctx.request_repaint_after(Duration::from_millis(16));
+            }
+        }
         self.drain_events(ctx);
 
-        // Full-window stage: 3D CAD Studio OR MindCorpus 3D Glitter Brain
+        let act = if self.capture.is_some() {
+            BrainActivity::Listening
+        } else if self.speech.is_speaking() || (self.streaming && self.messages.last().map(|m| !m.content.is_empty()).unwrap_or(false)) {
+            BrainActivity::Speaking
+        } else if self.streaming || self.cad_rx.is_some() || self.web_rx.is_some() || !self.input.is_empty() {
+            BrainActivity::Thinking
+        } else {
+            BrainActivity::Idle
+        };
+
+        // Full-window stage: 3D CAD Studio OR MindCorpus Prismatic Brain
         egui::CentralPanel::default()
             .frame(Frame::NONE.fill(Color32::from_rgb(3, 4, 7)))
             .show(ctx, |ui| {
                 let rect = ui.max_rect();
-                if self.dock.cad {
+                if self.active_tab == Some(DrawerTab::Cad) {
                     self.cad_viewport.ui_rect(ui, rect);
                 } else {
-                    let dt = ctx.input(|i| i.stable_dt).min(0.05);
-                    let (act, energy) = if let Some(cap) = &self.capture {
-                        (BrainActivity::Listening, (cap.current_rms() * 6.5).clamp(0.1, 1.0))
-                    } else if self.streaming {
-                        let empty = self.messages.last().map(|m| m.content.is_empty()).unwrap_or(true);
-                        if empty { (BrainActivity::Thinking, 0.45) } else { (BrainActivity::Speaking, 0.7) }
-                    } else if self.speech.is_speaking() {
-                        (BrainActivity::Speaking, 0.75)
-                    } else if !self.input.is_empty() {
-                        (BrainActivity::Idle, 0.2)
+                    let energy = if let Some(cap) = &self.capture {
+                        (cap.current_rms() * 6.5).clamp(0.1, 1.0)
                     } else {
-                        (BrainActivity::Idle, 0.05)
+                        match act {
+                            BrainActivity::Idle => 0.08,
+                            BrainActivity::Listening => 0.55,
+                            BrainActivity::Thinking => 0.75,
+                            BrainActivity::Speaking => 0.85,
+                        }
                     };
                     let (clicked_mem, interacting) = self.brain.paint(ui, rect, dt, act, energy);
                     if let Some(mem) = clicked_mem {
-                        self.dock.brain = true;
+                        self.active_tab = Some(DrawerTab::Memory);
                         self.memory_query = mem.clone();
                         self.memory_hits = self.store.search_fts(&mem, 12).unwrap_or_default();
                         if self.input.trim().is_empty() {
@@ -593,317 +721,463 @@ impl eframe::App for NephronApp {
                     if interacting {
                         ctx.request_repaint();
                     } else {
-                        let active = self.capture.is_some()
+                        let fast = self.capture.is_some()
                             || self.streaming
                             || self.cad_rx.is_some()
                             || self.web_rx.is_some()
                             || self.speech.is_speaking()
                             || self.brain.auto_rotate
                             || !self.input.is_empty();
-                        let wait_ms = if active { 33 } else { 150 };
-                        ctx.request_repaint_after(Duration::from_millis(wait_ms));
+                        ctx.request_repaint_after(Duration::from_millis(if fast { 33 } else { 150 }));
                     }
                 }
             });
 
-        // Top-left minimal borderless status pill
-        egui::Area::new(egui::Id::new("hud_status"))
-            .anchor(Align2::LEFT_TOP, [16.0, 14.0])
+        // 1. Whisper-Quiet Top-Left Backend Toggle Pill (click to toggle Cynapse / Ollama)
+        egui::Area::new(egui::Id::new("whisper_backend_dot"))
+            .anchor(Align2::LEFT_TOP, [18.0, 16.0])
             .show(ctx, |ui| {
-                hud_frame().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let dot = if self.daemon_online { Color32::from_rgb(85, 230, 196) } else { Color32::from_rgb(230, 140, 110) };
-                        ui.colored_label(dot, "●");
-                        ui.label(format!("{} · {} · {:.1} GiB free", self.backend_kind.label(), self.active_model_id(), self.telemetry.available_mib as f32 / 1024.0));
+                let dot_col = if self.daemon_online {
+                    Color32::from_rgb(56, 189, 248)
+                } else {
+                    Color32::from_rgb(251, 146, 60)
+                };
+                let label = match self.backend_kind {
+                    BackendKind::Cynapse => "cynapse",
+                    BackendKind::Ollama => "ollama",
+                };
+                let btn = egui::Button::new(
+                    egui::RichText::new(format!("   {label}"))
+                        .size(11.5)
+                        .monospace()
+                        .color(Color32::from_rgb(203, 213, 225)),
+                )
+                .fill(Color32::from_rgba_unmultiplied(11, 15, 25, 190))
+                .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 28)))
+                .corner_radius(16.0)
+                .min_size(egui::vec2(88.0, 28.0));
+                let tip = format!(
+                    "Click to switch Cynapse / Ollama\nModel: {}\nRAM free: {:.1} GiB",
+                    self.active_model_id(),
+                    self.telemetry.available_mib as f32 / 1024.0
+                );
+                let resp = ui.add(btn).on_hover_text(tip);
+                ui.painter().circle_filled(
+                    Pos2::new(resp.rect.left() + 14.0, resp.rect.center().y),
+                    3.2,
+                    dot_col,
+                );
+                if resp.clicked() {
+                    let next = match self.backend_kind {
+                        BackendKind::Cynapse => BackendKind::Ollama,
+                        BackendKind::Ollama => BackendKind::Cynapse,
+                    };
+                    self.switch_backend(next);
+                }
+            });
+
+        // 2. Single Centered Kinetic Mini-Drawer (opens smoothly above the bottom navbar)
+        if let Some(tab) = self.active_tab {
+            egui::Area::new(egui::Id::new("kinetic_drawer"))
+                .anchor(Align2::CENTER_BOTTOM, [0.0, -78.0])
+                .show(ctx, |ui| {
+                    kinetic_glass().show(ui, |ui| {
+                        ui.set_min_width(285.0);
+                        ui.set_max_width(285.0);
+                        match tab {
+                            DrawerTab::Bridge => {
+                                ui.horizontal(|ui| {
+                                    if ui.selectable_label(self.backend_kind == BackendKind::Cynapse, "cynapse").clicked() {
+                                        self.switch_backend(BackendKind::Cynapse);
+                                    }
+                                    if ui.selectable_label(self.backend_kind == BackendKind::Ollama, "ollama").clicked() {
+                                        self.switch_backend(BackendKind::Ollama);
+                                    }
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        ui.checkbox(&mut self.auto_tts, "tts");
+                                        ui.checkbox(&mut self.auto_vad, "vad");
+                                    });
+                                });
+                                ui.horizontal(|ui| {
+                                    if self.backend_kind == BackendKind::Cynapse {
+                                        egui::ComboBox::from_id_salt("cyn_m").selected_text(self.model.id()).show_ui(ui, |ui| {
+                                            for m in ModelProfile::ALL {
+                                                ui.selectable_value(&mut self.model, m, m.id());
+                                            }
+                                        });
+                                    } else {
+                                        egui::ComboBox::from_id_salt("ol_m").selected_text(&self.selected_ollama).show_ui(ui, |ui| {
+                                            for m in &self.ollama_models {
+                                                ui.selectable_value(&mut self.selected_ollama, m.clone(), m);
+                                            }
+                                        });
+                                        if ui.small_button("↻").clicked() {
+                                            self.refresh_ollama();
+                                        }
+                                    }
+                                    egui::ComboBox::from_id_salt("eff").selected_text(self.effort.as_str()).show_ui(ui, |ui| {
+                                        for e in EffortLevel::ALL {
+                                            ui.selectable_value(&mut self.effort, e, e.as_str());
+                                        }
+                                    });
+                                });
+                            }
+                            DrawerTab::Memory => {
+                                ui.horizontal(|ui| {
+                                    ui.small(egui::RichText::new("dendrites").color(Color32::from_rgb(252, 211, 77)));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if ui.small_button("clear unpinned").clicked() {
+                                            let _ = self.store.clear_unpinned();
+                                            self.sync_brain();
+                                        }
+                                        ui.checkbox(&mut self.inject_pinned, "pin ctx");
+                                    });
+                                });
+                                ui.horizontal(|ui| {
+                                    let r = ui.add_sized([200.0, 22.0], egui::TextEdit::singleline(&mut self.memory_query).hint_text("search memory..."));
+                                    if (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) || ui.small_button("go").clicked() {
+                                        self.memory_hits = self.store.search_fts(&self.memory_query, 12).unwrap_or_default();
+                                    }
+                                });
+                                let mut toggle_pin: Option<(i64, bool)> = None;
+                                egui::ScrollArea::vertical().max_height(150.0).show(ui, |ui| {
+                                    ui.set_max_width(270.0);
+                                    for h in &self.memory_hits {
+                                        ui.horizontal(|ui| {
+                                            if ui.small_button(if h.pinned { "★" } else { "☆" }).clicked() {
+                                                toggle_pin = Some((h.id, !h.pinned));
+                                            }
+                                            let preview: String = h.content.chars().take(90).collect();
+                                            ui.add(egui::Label::new(egui::RichText::new(format!("[{}] {}", h.kind, preview)).size(11.0)).wrap());
+                                        });
+                                        ui.separator();
+                                    }
+                                });
+                                if let Some((id, pinned)) = toggle_pin {
+                                    let _ = self.store.pin_memory(id, pinned);
+                                    self.sync_brain();
+                                }
+                            }
+                            DrawerTab::Cad => {
+                                ui.horizontal(|ui| {
+                                    ui.add_sized([130.0, 22.0], egui::TextEdit::singleline(&mut self.cad_part_name));
+                                    if ui.small_button("Compile").clicked() { self.compile_cad(); }
+                                    if ui.small_button("Gen AI").clicked() {
+                                        let d = if self.input.trim().is_empty() { self.cad_part_name.clone() } else { self.input.clone() };
+                                        self.generate_cad(d);
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut self.cad_viewport.wireframe, "wire");
+                                    let cv_on = self.cv_gesture.is_some();
+                                    if ui.selectable_label(cv_on, "cv hand").clicked() {
+                                        if cv_on {
+                                            self.cv_gesture = None;
+                                        } else {
+                                            self.cv_gesture = CvGestureTracker::start("/dev/video0").ok();
+                                        }
+                                    }
+                                    if ui.small_button("export stl").clicked() { self.export_stl(); }
+                                    if let Some(p) = &self.last_export_path {
+                                        if ui.small_button("slicer").clicked() {
+                                            let _ = execute_action(&ComputerAction::OpenPath(p.clone()));
+                                        }
+                                    }
+                                });
+                                if let Some(d) = &mut self.cad_design {
+                                    if let Some(prim) = d.parts.first_mut().and_then(|p| p.primitives.first_mut()) {
+                                        let mut changed = false;
+                                        ui.horizontal(|ui| {
+                                            changed |= ui.add(egui::DragValue::new(&mut prim.size[0]).range(1.0..=500.0).prefix("W ")).changed();
+                                            changed |= ui.add(egui::DragValue::new(&mut prim.size[1]).range(1.0..=500.0).prefix("D ")).changed();
+                                            changed |= ui.add(egui::DragValue::new(&mut prim.size[2]).range(1.0..=500.0).prefix("H ")).changed();
+                                        });
+                                        if changed {
+                                            if let Ok(m) = d.build_mesh() {
+                                                self.cad_viewport.mesh = m;
+                                            }
+                                        }
+                                    }
+                                }
+                                ui.add(egui::TextEdit::multiline(&mut self.cad_scad).desired_rows(3).code_editor());
+                                for p in self.cad_parts.iter().take(2) {
+                                    ui.small(format!("{} x{} ({})", p.name, p.quantity, p.material));
+                                }
+                            }
+                            DrawerTab::Agents => {
+                                ui.horizontal(|ui| {
+                                    for (sp, ico) in [(PetSpecies::Cat, "🐱"), (PetSpecies::Chiba, "🐕"), (PetSpecies::Sheep, "🐑")] {
+                                        if ui.selectable_label(self.pet_species == sp && self.pet_active, ico).clicked() {
+                                            self.pet_species = sp;
+                                            self.pet_active = true;
+                                            self.pet_proc.kill();
+                                        }
+                                    }
+                                    ui.separator();
+                                    if ui.small_button(if self.pet_active { "hide pet" } else { "pet" }).clicked() {
+                                        self.pet_active = !self.pet_active;
+                                    }
+                                    if ui.selectable_label(self.swarm_active, "swarm").clicked() {
+                                        self.swarm_active = !self.swarm_active;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    if ui.small_button("⚡ shot").clicked() {
+                                        let _ = execute_action(&ComputerAction::CaptureScreen(std::env::temp_dir().join("nephron_cua.png")));
+                                    }
+                                    if ui.small_button("⚡ term").clicked() {
+                                        let _ = execute_action(&ComputerAction::LaunchApp("gnome-terminal".into()));
+                                    }
+                                    if ui.small_button("⚡ check").clicked() {
+                                        if let Ok(out) = execute_action(&ComputerAction::AllowlistedCheck { bin: "uname", args: vec!["-a".into()] }) {
+                                            self.messages.push(ChatMessage { role: ChatRole::Assistant, content: out });
+                                        }
+                                    }
+                                });
+                            }
+                            DrawerTab::Cortex => {
+                                ui.horizontal(|ui| {
+                                    if ui.selectable_label(self.brain.auto_rotate, "spin").clicked() {
+                                        self.brain.auto_rotate = !self.brain.auto_rotate;
+                                    }
+                                    if ui.small_button("hue").clicked() {
+                                        self.brain.palette_idx = (self.brain.palette_idx + 1) % 3;
+                                        self.brain.trigger_cascade();
+                                    }
+                                    ui.checkbox(&mut self.web_mode, "web");
+                                });
+                                ui.add(egui::Slider::new(&mut self.brain.pulse_speed, 0.3..=2.5).text("pulse"));
+                                ui.add(egui::Slider::new(&mut self.brain.glitter, 0.4..=1.8).text("glitter"));
+                            }
+                        }
                     });
+                });
+        }
+
+        // 3. Center-Bottom Kinetic Icon Navbar with Sliding Magnetic Pill
+        egui::Area::new(egui::Id::new("kinetic_navbar"))
+            .anchor(Align2::CENTER_BOTTOM, [0.0, -18.0])
+            .show(ctx, |ui| {
+                kinetic_dock_frame().show(ui, |ui| {
+                    let mut tab_centers = [Pos2::ZERO; 5];
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        let mic_active = self.capture.is_some();
+                        let (mic_clk, mic_c) = kinetic_icon(ui, "nav_mic", mic_active, "◉", "Voice Mic (Ctrl+M)", Color32::from_rgb(253, 164, 175));
+                        if mic_active {
+                            let r = 16.0 + ((self.ui_time * 3.0).sin() * 0.5 + 0.5) * 6.0;
+                            ui.painter().circle_stroke(mic_c, r, Stroke::new(1.5_f32, Color32::from_rgba_unmultiplied(251, 113, 133, 160)));
+                        }
+                        if mic_clk {
+                            self.toggle_mic();
+                        }
+
+                        ui.separator();
+
+                        let tabs = [
+                            (DrawerTab::Bridge, "nav_bridge", "⚙", "AI Bridge", Color32::from_rgb(125, 211, 252)),
+                            (DrawerTab::Memory, "nav_mem", "◈", "Dendrite Memory", Color32::from_rgb(252, 211, 77)),
+                            (DrawerTab::Cad, "nav_cad", "📐", "Parametric CAD", Color32::from_rgb(110, 231, 183)),
+                            (DrawerTab::Agents, "nav_agents", "🐾", "Pets & Swarm", Color32::from_rgb(216, 180, 254)),
+                            (DrawerTab::Cortex, "nav_cortex", "🎨", "Cortex Visuals", Color32::from_rgb(203, 213, 225)),
+                        ];
+                        for (tab, id, ico, tip, col) in tabs {
+                            let is_active = self.active_tab == Some(tab);
+                            let (clk, c) = kinetic_icon(ui, id, is_active, ico, tip, col);
+                            tab_centers[tab.slot_index()] = c;
+                            if clk {
+                                self.active_tab = if is_active { None } else { Some(tab) };
+                            }
+                        }
+
+                        let (burst_clk, _) = kinetic_icon(ui, "nav_burst", false, "⚡", "Synaptic Cascade", Color32::from_rgb(103, 232, 249));
+                        if burst_clk {
+                            self.brain.trigger_cascade();
+                        }
+                    });
+
+                    if let Some(tab) = self.active_tab {
+                        let target_c = tab_centers[tab.slot_index()];
+                        let x = self.pill_x.get_or_insert(target_c.x);
+                        *x += (target_c.x - *x) * (1.0 - (-dt * 14.0).exp());
+                        ui.painter().circle_filled(
+                            Pos2::new(*x, target_c.y),
+                            18.0,
+                            Color32::from_rgba_unmultiplied(255, 255, 255, 26),
+                        );
+                        ui.painter().circle_stroke(
+                            Pos2::new(*x, target_c.y),
+                            18.0,
+                            Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 45)),
+                        );
+                    } else {
+                        self.pill_x = None;
+                    }
                 });
             });
 
-        // Floating HUD drawers (Chat, Brain Memory, CAD, Backend)
-        if self.dock.chat {
-            egui::Area::new(egui::Id::new("hud_chat"))
-                .anchor(Align2::LEFT_BOTTOM, [14.0, -110.0])
+        // 4. Bottom-Right Living Bubble Head Companion + Expandable Universal Chat Popover
+        if self.bubble_open {
+            egui::Area::new(egui::Id::new("bubble_popover"))
+                .anchor(Align2::RIGHT_BOTTOM, [-20.0, -86.0])
                 .show(ctx, |ui| {
-                    hud_frame().show(ui, |ui| {
-                        ui.set_max_width(420.0);
-                        ui.set_max_height(280.0);
-                        egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
+                    kinetic_glass().show(ui, |ui| {
+                        ui.set_width(320.0);
+                        egui::ScrollArea::vertical().max_height(210.0).stick_to_bottom(true).show(ui, |ui| {
                             for m in &self.messages {
-                                let who = match m.role {
-                                    ChatRole::User => "You",
-                                    ChatRole::Assistant => "Nephron",
-                                    ChatRole::System => "System",
+                                let (who, col) = match m.role {
+                                    ChatRole::User => ("You", Color32::from_rgb(125, 211, 252)),
+                                    ChatRole::Assistant => ("Nephron", Color32::from_rgb(165, 180, 252)),
+                                    ChatRole::System => ("System", Color32::from_rgb(148, 163, 184)),
                                 };
-                                ui.strong(who);
-                                ui.label(&m.content);
+                                ui.colored_label(col, egui::RichText::new(who).strong().size(11.0));
+                                ui.label(egui::RichText::new(&m.content).size(12.0));
                                 ui.add_space(4.0);
                             }
                             if !self.web_sources.is_empty() {
                                 ui.separator();
                                 ui.horizontal(|ui| {
                                     ui.small("Sources");
-                                    if ui.small_button("Clear").clicked() {
+                                    if ui.small_button("clear").clicked() {
                                         self.web_sources.clear();
                                     }
                                 });
-                                ui.horizontal_wrapped(|ui| {
-                                    for (i, s) in self.web_sources.iter().enumerate() {
-                                        let domain = s
-                                            .url
-                                            .split("//")
-                                            .nth(1)
-                                            .and_then(|rest| rest.split('/').next())
-                                            .unwrap_or("web")
-                                            .trim_start_matches("www.");
-                                        let short_title: String = s.title.chars().take(28).collect();
-                                        Frame::NONE
-                                            .fill(Color32::from_rgba_unmultiplied(24, 32, 48, 220))
-                                            .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(125, 211, 252, 45)))
-                                            .corner_radius(8.0)
-                                            .inner_margin(egui::Margin::symmetric(8, 5))
-                                            .show(ui, |ui| {
-                                                ui.set_max_width(185.0);
-                                                ui.hyperlink_to(
-                                                    egui::RichText::new(format!("[{}] {}", i + 1, short_title)).size(11.5),
-                                                    &s.url,
-                                                )
-                                                .on_hover_text(format!("{}\n{}", s.title, s.snippet));
-                                                ui.small(egui::RichText::new(domain).color(Color32::from_rgb(148, 163, 184)).size(10.0));
-                                            });
+                                let mut save_source: Option<(String, String)> = None;
+                                for row in self.web_sources.chunks(2) {
+                                    ui.horizontal(|ui| {
+                                        for (j, s) in row.iter().enumerate() {
+                                            let idx = self.web_sources.iter().position(|x| std::ptr::eq(x, s)).unwrap_or(j);
+                                            let domain = s.url.split("//").nth(1).and_then(|r| r.split('/').next()).unwrap_or("web").trim_start_matches("www.");
+                                            let short: String = s.title.chars().take(18).collect();
+                                            Frame::NONE
+                                                .fill(Color32::from_rgba_unmultiplied(24, 32, 48, 220))
+                                                .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(125, 211, 252, 45)))
+                                                .corner_radius(8.0)
+                                                .inner_margin(egui::Margin::symmetric(8, 5))
+                                                .show(ui, |ui| {
+                                                    ui.set_min_width(134.0);
+                                                    ui.set_max_width(134.0);
+                                                    ui.vertical(|ui| {
+                                                        ui.horizontal(|ui| {
+                                                            ui.hyperlink_to(egui::RichText::new(format!("[{}] {}", idx + 1, short)).size(11.0), &s.url)
+                                                                .on_hover_text(format!("{}\n{}", s.title, s.snippet));
+                                                            if ui.small_button("★").on_hover_text("Pin to Dendrite").clicked() {
+                                                                save_source = Some((s.title.clone(), s.url.clone()));
+                                                            }
+                                                        });
+                                                        ui.small(egui::RichText::new(domain).color(Color32::from_rgb(148, 163, 184)).size(9.5));
+                                                    });
+                                                });
+                                        }
+                                    });
+                                    ui.add_space(4.0);
+                                }
+                                if let Some((title, url)) = save_source {
+                                    if let Ok(id) = self.store.save_memory("web", &format!("{title} — {url}")) {
+                                        let _ = self.store.pin_memory(id, true);
+                                        self.sync_brain();
                                     }
-                                });
-                            }
-                        });
-                    });
-                });
-        }
-
-        if self.dock.brain {
-            egui::Area::new(egui::Id::new("hud_brain"))
-                .anchor(Align2::RIGHT_TOP, [-14.0, 12.0])
-                .show(ctx, |ui| {
-                    hud_frame().show(ui, |ui| {
-                        ui.set_width(270.0);
-                        ui.set_max_height(320.0);
-                        ui.horizontal(|ui| {
-                            ui.strong("Dendrite Brain DB");
-                            if ui.small_button("Clear Unpinned").clicked() {
-                                let _ = self.store.clear_unpinned();
-                                self.sync_brain();
-                            }
-                        });
-                        ui.horizontal(|ui| {
-                            if ui.text_edit_singleline(&mut self.memory_query).lost_focus()
-                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                            {
-                                self.memory_hits = self.store.search_fts(&self.memory_query, 12).unwrap_or_default();
-                            }
-                            if ui.button("Search").clicked() {
-                                self.memory_hits = self.store.search_fts(&self.memory_query, 12).unwrap_or_default();
-                            }
-                        });
-                        let mut toggle_pin: Option<(i64, bool)> = None;
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            for h in &self.memory_hits {
-                                ui.horizontal(|ui| {
-                                    let pin_lbl = if h.pinned { "📌" } else { "·" };
-                                    if ui.small_button(pin_lbl).clicked() {
-                                        toggle_pin = Some((h.id, !h.pinned));
-                                    }
-                                    ui.small(format!("[{}] {}", h.kind, h.content));
-                                });
-                                ui.separator();
-                            }
-                        });
-                        if let Some((id, pinned)) = toggle_pin {
-                            let _ = self.store.pin_memory(id, pinned);
-                            self.sync_brain();
-                        }
-                    });
-                });
-        }
-
-        if self.dock.cad {
-            egui::Area::new(egui::Id::new("hud_cad"))
-                .anchor(Align2::RIGHT_BOTTOM, [-16.0, -110.0])
-                .show(ctx, |ui| {
-                    hud_frame().show(ui, |ui| {
-                        ui.set_width(300.0);
-                        ui.horizontal(|ui| {
-                            ui.add_sized([110.0, 22.0], egui::TextEdit::singleline(&mut self.cad_part_name));
-                            if ui.button("Compile").clicked() { self.compile_cad(); }
-                            if ui.button("Gen AI").clicked() {
-                                let d = if self.input.trim().is_empty() { self.cad_part_name.clone() } else { self.input.clone() };
-                                self.generate_cad(d);
-                            }
-                        });
-                        ui.horizontal(|ui| {
-                            ui.checkbox(&mut self.cad_viewport.wireframe, "Wire");
-                            if ui.button("Export STL").clicked() {
-                                self.export_stl();
-                            }
-                            if let Some(p) = &self.last_export_path {
-                                if ui.button("Slicer").clicked() {
-                                    let _ = execute_action(&ComputerAction::OpenPath(p.clone()));
                                 }
                             }
                         });
-                        ui.add(egui::TextEdit::multiline(&mut self.cad_scad).desired_rows(3).code_editor());
-                        for p in self.cad_parts.iter().take(3) {
-                            ui.small(format!("{} x{} ({})", p.name, p.quantity, p.material));
-                        }
-                    });
-                });
-        }
-
-        if self.dock.backend {
-            egui::Area::new(egui::Id::new("hud_backend"))
-                .anchor(Align2::CENTER_BOTTOM, [0.0, -115.0])
-                .show(ctx, |ui| {
-                    hud_frame().show(ui, |ui| {
+                        ui.add_space(4.0);
                         ui.horizontal(|ui| {
-                            if ui.selectable_label(self.backend_kind == BackendKind::Cynapse, "Cynapse :38265").clicked() {
-                                self.switch_backend(BackendKind::Cynapse);
-                            }
-                            if ui.selectable_label(self.backend_kind == BackendKind::Ollama, "Ollama :11434").clicked() {
-                                self.switch_backend(BackendKind::Ollama);
-                            }
-                        });
-                        ui.horizontal(|ui| {
-                            if self.backend_kind == BackendKind::Cynapse {
-                                egui::ComboBox::from_id_salt("cyn_m").selected_text(self.model.id()).show_ui(ui, |ui| {
-                                    for m in ModelProfile::ALL {
-                                        ui.selectable_value(&mut self.model, m, m.id());
-                                    }
-                                });
-                            } else {
-                                egui::ComboBox::from_id_salt("ol_m").selected_text(&self.selected_ollama).show_ui(ui, |ui| {
-                                    for m in &self.ollama_models {
-                                        ui.selectable_value(&mut self.selected_ollama, m.clone(), m);
-                                    }
-                                });
-                                if ui.button("Refresh").clicked() { self.refresh_ollama(); }
-                            }
-                            egui::ComboBox::from_id_salt("eff").selected_text(self.effort.as_str()).show_ui(ui, |ui| {
-                                for e in EffortLevel::ALL {
-                                    ui.selectable_value(&mut self.effort, e, e.as_str());
-                                }
-                            });
-                            ui.checkbox(&mut self.auto_tts, "TTS");
-                        });
-                    });
-                });
-        }
-
-        if self.dock.pet_menu {
-            egui::Area::new(egui::Id::new("hud_pet_picker"))
-                .anchor(Align2::CENTER_BOTTOM, [0.0, -115.0])
-                .show(ctx, |ui| {
-                    hud_frame().show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            for sp in [PetSpecies::Cat, PetSpecies::Chiba, PetSpecies::Sheep] {
-                                if ui.selectable_label(self.pet_species == sp, sp.name()).clicked() {
-                                    self.pet_species = sp;
-                                    self.dock.pet = true;
-                                    self.pet_proc.kill();
-                                }
-                            }
-                            ui.separator();
-                            let lbl = if self.dock.pet { "Hide Pet" } else { "Spawn Pet" };
-                            if ui.button(lbl).clicked() {
-                                self.dock.pet = !self.dock.pet;
-                            }
-                        });
-                    });
-                });
-        }
-
-        // OS-style Bottom Application Dock (`mindcorpus_neural_canvas_3d_brain_explorer.html` layout)
-        egui::Area::new(egui::Id::new("os_dock"))
-            .anchor(Align2::CENTER_BOTTOM, [0.0, -16.0])
-            .show(ctx, |ui| {
-                dock_frame().show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.horizontal(|ui| {
-                            let resp = ui.add_sized([390.0, 26.0], egui::TextEdit::singleline(&mut self.input).hint_text("Ask Nephron..."));
+                            let resp = ui.add_sized([255.0, 26.0], egui::TextEdit::singleline(&mut self.input).hint_text("Ask, search, or build CAD..."));
                             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            if (ui.add_enabled(!self.streaming, egui::Button::new("Send")).clicked() || enter) && !self.streaming {
+                            if (ui.add_enabled(!self.streaming, egui::Button::new("→")).clicked() || enter) && !self.streaming {
                                 self.send_prompt();
                             }
                         });
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            if dock_icon(ui, self.dock.chat, "💬", "Chat", Color32::from_rgb(226, 232, 240)) {
-                                self.dock.chat = !self.dock.chat;
-                            }
-                            if dock_icon(ui, self.dock.brain, "◈", "Dendrite Brain DB", Color32::from_rgb(165, 180, 252)) {
-                                self.dock.brain = !self.dock.brain;
-                            }
-                            let mic_active = self.capture.is_some();
-                            if dock_icon(ui, mic_active, "◉", "Voice (Ctrl+M)", Color32::from_rgb(56, 189, 248)) {
-                                self.toggle_mic();
-                            }
-                            if dock_icon(ui, self.dock.pet, "🐾", "Choose Desktop Pet (Cat / Chiba / Sheep)", Color32::from_rgb(110, 231, 183)) {
-                                self.dock.pet_menu = !self.dock.pet_menu;
-                                if self.dock.pet_menu { self.dock.backend = false; }
-                            }
-                            if dock_icon(ui, self.dock.swarm, "✨", "Desktop Swarm Cursors", Color32::from_rgb(251, 191, 36)) {
-                                self.dock.swarm = !self.dock.swarm;
-                            }
-                            if self.dock.swarm && dock_icon(ui, false, "⚡", "Run CUA Capture & Notify", Color32::from_rgb(251, 191, 36)) {
-                                let shot = std::env::temp_dir().join("nephron_cua_screen.png");
-                                let _ = execute_action(&ComputerAction::CaptureScreen(shot));
-                                let _ = execute_action(&ComputerAction::Notify {
-                                    title: "Nephron CUA".into(),
-                                    body: "Swarm desktop observation active".into(),
-                                });
-                            }
-                            if dock_icon(ui, self.dock.cad, "📐", "3D CAD Studio", Color32::from_rgb(125, 211, 252)) {
-                                self.dock.cad = !self.dock.cad;
-                            }
-                            if dock_icon(ui, self.dock.web, "🌐", "Perplexica Web Search", Color32::from_rgb(192, 132, 252)) {
-                                self.dock.web = !self.dock.web;
-                            }
-                            if dock_icon(ui, false, "🎨", "Shift Brain Spectrum", Color32::from_rgb(216, 180, 254)) {
-                                self.brain.palette_idx = (self.brain.palette_idx + 1) % 3;
-                                self.brain.trigger_cascade();
-                            }
-                            if dock_icon(ui, self.dock.backend, "⚙", "Backend (Cynapse / Ollama)", Color32::from_rgb(148, 163, 184)) {
-                                self.dock.backend = !self.dock.backend;
-                                if self.dock.backend { self.dock.pet_menu = false; }
-                            }
-                        });
                     });
                 });
-                let sp_arg = match self.pet_species {
-                    PetSpecies::Cat => "cat",
-                    PetSpecies::Chiba => "chiba",
-                    PetSpecies::Sheep => "sheep",
-                };
-                let backend_arg = match self.backend_kind {
-                    BackendKind::Cynapse => "cynapse",
-                    BackendKind::Ollama => "ollama",
-                };
-                let pet_url = self.client.base_url().to_string();
-                let pet_model = self.active_model_id();
-                self.pet_proc.set_active_args(
-                    self.dock.pet,
-                    &["--pet-only", sp_arg, backend_arg, &pet_url, &pet_model],
-                );
-                self.swarm_proc.set_active(self.dock.swarm, "--swarm-only");
-                if self.dock.pet {
-                    let mood = if self.web_rx.is_some() || self.cad_rx.is_some() || self.dock.swarm {
-                        "scan"
-                    } else if self.streaming {
-                        "think"
-                    } else {
-                        "idle"
+        }
+
+        egui::Area::new(egui::Id::new("bubble_head_orb"))
+            .anchor(Align2::RIGHT_BOTTOM, [-20.0, -18.0])
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let status_txt = match act {
+                        BrainActivity::Listening => Some("listening..."),
+                        BrainActivity::Thinking => Some("thinking..."),
+                        BrainActivity::Speaking => Some("speaking..."),
+                        BrainActivity::Idle => None,
                     };
-                    if mood != self.last_pet_mood {
-                        self.last_pet_mood = mood;
-                        set_pet_mood_hint(mood);
+                    if let Some(st) = status_txt {
+                        Frame::NONE
+                            .fill(Color32::from_rgba_unmultiplied(10, 14, 24, 195))
+                            .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 28)))
+                            .corner_radius(14.0)
+                            .inner_margin(egui::Margin::symmetric(10, 5))
+                            .show(ui, |ui| {
+                                ui.small(egui::RichText::new(st).monospace().color(Color32::from_rgb(203, 213, 225)));
+                            });
                     }
-                }
+
+                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(52.0, 52.0), egui::Sense::click());
+                    let hov = ui.ctx().animate_bool(egui::Id::new("orb_hov"), resp.hovered());
+                    let bob = (self.ui_time * 2.2).sin() * 2.5;
+                    let c = Pos2::new(rect.center().x, rect.center().y + bob);
+                    let r = 24.0 + hov * 2.0;
+                    let ring_col = if self.capture.is_some() {
+                        Color32::from_rgba_unmultiplied(251, 113, 133, 180)
+                    } else {
+                        Color32::from_rgba_unmultiplied(56, 189, 248, (90.0 + hov * 90.0) as u8)
+                    };
+                    ui.painter().circle_filled(c, r, Color32::from_rgba_unmultiplied(15, 23, 42, 225));
+                    ui.painter().circle_stroke(c, r, Stroke::new(1.5_f32, ring_col));
+
+                    if self.capture.is_some() {
+                        for k in 0..4 {
+                            let h = 6.0 + ((self.ui_time * 8.0 + k as f32 * 1.3).sin() * 0.5 + 0.5) * 10.0;
+                            let x = c.x - 9.0 + k as f32 * 6.0;
+                            ui.painter().line_segment([Pos2::new(x, c.y - h * 0.5), Pos2::new(x, c.y + h * 0.5)], Stroke::new(2.2_f32, Color32::from_rgb(253, 164, 175)));
+                        }
+                    } else {
+                        let blink = if (self.ui_time % 4.6) > 4.45 { 0.3 } else { 3.0 };
+                        let eye_col = Color32::from_rgb(186, 230, 253);
+                        ui.painter().rect_filled(Rect::from_center_size(Pos2::new(c.x - 6.5, c.y - 3.0), egui::vec2(3.6, blink * 2.0)), 1.5, eye_col);
+                        ui.painter().rect_filled(Rect::from_center_size(Pos2::new(c.x + 6.5, c.y - 3.0), egui::vec2(3.6, blink * 2.0)), 1.5, eye_col);
+                        let mouth_y = c.y + 6.0 + if act == BrainActivity::Speaking { (self.ui_time * 14.0).sin().abs() * 2.5 } else { 0.0 };
+                        ui.painter().line_segment([Pos2::new(c.x - 5.0, c.y + 5.5), Pos2::new(c.x, mouth_y)], Stroke::new(1.8_f32, eye_col));
+                        ui.painter().line_segment([Pos2::new(c.x, mouth_y), Pos2::new(c.x + 5.0, c.y + 5.5)], Stroke::new(1.8_f32, eye_col));
+                    }
+                    if resp.on_hover_text("Toggle Chat / Prompt").clicked() {
+                        self.bubble_open = !self.bubble_open;
+                    }
+                });
             });
+
+        // Overlay subprocesses (Pet & Swarm)
+        let sp_arg = match self.pet_species {
+            PetSpecies::Cat => "cat",
+            PetSpecies::Chiba => "chiba",
+            PetSpecies::Sheep => "sheep",
+        };
+        let backend_arg = match self.backend_kind {
+            BackendKind::Cynapse => "cynapse",
+            BackendKind::Ollama => "ollama",
+        };
+        let pet_url = self.client.base_url().to_string();
+        let pet_model = self.active_model_id();
+        self.pet_proc.set_active_args(
+            self.pet_active,
+            &["--pet-only", sp_arg, backend_arg, &pet_url, &pet_model],
+        );
+        self.swarm_proc.set_active(self.swarm_active, "--swarm-only");
+        if self.pet_active {
+            let mood = if self.speech.is_speaking() {
+                "talk"
+            } else if self.web_rx.is_some() || self.cad_rx.is_some() {
+                "scan"
+            } else if self.streaming {
+                "think"
+            } else {
+                "idle"
+            };
+            if mood != self.last_pet_mood {
+                self.last_pet_mood = mood;
+                set_pet_mood_hint(mood);
+            }
+        }
     }
 }

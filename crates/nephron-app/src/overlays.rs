@@ -47,12 +47,6 @@ impl OverlayChild {
     }
 }
 
-impl Drop for OverlayChild {
-    fn drop(&mut self) {
-        self.kill();
-    }
-}
-
 pub fn run_pet_only(rt: Runtime, client: CynapseClient, species: PetSpecies, model_id: String) -> eframe::Result<()> {
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -109,6 +103,7 @@ impl eframe::App for PetOnlyApp {
                     match h.as_str() {
                         "scan" => self.pet.set_mood(PetMood::Scan),
                         "think" => self.pet.set_mood(PetMood::Think),
+                        "talk" => self.pet.set_mood(PetMood::Talk),
                         _ => self.pet.set_mood(PetMood::Idle),
                     }
                 }
@@ -181,6 +176,7 @@ pub fn run_swarm_only() -> eframe::Result<()> {
     };
     let mut swarm = SwarmCanvas::default();
     swarm.demo_mode = true;
+    swarm.tick(0.016);
     eframe::run_native(
         "Nephron Swarm",
         opts,

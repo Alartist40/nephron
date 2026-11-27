@@ -7,9 +7,7 @@ use std::time::Duration;
 pub fn draw_swarm_overlay(ui: &mut egui::Ui, rect: Rect, swarm: &mut SwarmCanvas) {
     let dt = ui.input(|i| i.stable_dt).min(0.05);
     swarm.tick(dt);
-    if !swarm.cursors.is_empty() || swarm.demo_mode {
-        ui.ctx().request_repaint_after(Duration::from_millis(16));
-    }
+    ui.ctx().request_repaint_after(Duration::from_millis(16));
 
     let painter = ui.painter_at(rect);
     for c in swarm.cursors.values() {
@@ -20,40 +18,36 @@ pub fn draw_swarm_overlay(ui: &mut egui::Ui, rect: Rect, swarm: &mut SwarmCanvas
             rect.top() + c.pos[1] * rect.height(),
         );
 
-        // Action visual feedback
-        match c.action {
-            SwarmAction::Read | SwarmAction::Search => {
-                let box_rect = Rect::from_min_size(p + egui::vec2(8.0, 8.0), egui::vec2(64.0, 24.0));
-                painter.rect_stroke(box_rect, 3.0, Stroke::new(1.5_f32, color), egui::StrokeKind::Outside);
-            }
-            SwarmAction::Edit | SwarmAction::CadBuild => {
-                let dx = (c.phase.sin()) * 14.0;
-                painter.line_segment(
-                    [p + egui::vec2(6.0, 12.0), p + egui::vec2(26.0 + dx, 12.0)],
-                    Stroke::new(2.0_f32, color),
-                );
-            }
-            SwarmAction::Test => {
-                let rad = 10.0 + c.phase.sin().abs() * 6.0;
-                painter.circle_stroke(p, rad, Stroke::new(1.5_f32, color));
-            }
-            SwarmAction::Idle => {}
+        // Subtle pulse ring around cursor tip
+        if !matches!(c.action, SwarmAction::Idle) {
+            let rad = 7.0 + c.phase.sin().abs() * 4.5;
+            painter.circle_stroke(
+                p,
+                rad,
+                Stroke::new(1.2_f32, Color32::from_rgba_unmultiplied(r, g, b, 110)),
+            );
         }
 
-        // Cursor pointer triangle + role/detail pill
+        // Crisp pointer triangle
         let tip = [p, p + egui::vec2(0.0, 14.0), p + egui::vec2(10.0, 10.0)];
         painter.add(egui::Shape::convex_polygon(tip.to_vec(), color, Stroke::NONE));
+
+        // Clean glass pill badge offset below-right of cursor (never overlaps cursor or other elements)
         let tag = if c.detail.is_empty() {
             c.role.label().to_string()
         } else {
-            format!("{}: {}", c.role.label(), c.detail)
+            format!("{} · {}", c.role.label(), c.detail)
         };
-        painter.text(
-            p + egui::vec2(12.0, -2.0),
-            egui::Align2::LEFT_TOP,
-            tag,
-            FontId::proportional(11.5),
-            color,
+        let pill_pos = p + egui::vec2(12.0, 12.0);
+        let text_galley = painter.layout_no_wrap(tag, FontId::proportional(11.0), Color32::from_rgb(241, 245, 249));
+        let pill_rect = Rect::from_min_size(pill_pos, text_galley.size() + egui::vec2(12.0, 6.0));
+        painter.rect_filled(pill_rect, 8.0, Color32::from_rgba_unmultiplied(10, 14, 24, 215));
+        painter.rect_stroke(
+            pill_rect,
+            8.0,
+            Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(r, g, b, 140)),
+            egui::StrokeKind::Outside,
         );
+        painter.galley(pill_pos + egui::vec2(6.0, 3.0), text_galley, Color32::WHITE);
     }
 }

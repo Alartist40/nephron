@@ -66,8 +66,8 @@ impl CadViewport {
             let cz = z - mesh_center[2];
             let rx = cx * cy - cy_m * sy;
             let ry = cx * sy + cy_m * cy;
-            let rz = ry * sp + cz * cp;
-            let py = ry * cp - cz * sp;
+            let rz = ry * cp + cz * sp;
+            let py = cz * cp - ry * sp;
             (Pos2::new(center.x + rx * fit_scale, center.y - py * fit_scale), rz)
         };
 
