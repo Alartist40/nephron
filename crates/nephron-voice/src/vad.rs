@@ -15,8 +15,8 @@ pub struct VadConfig {
 impl Default for VadConfig {
     fn default() -> Self {
         Self {
-            threshold_rms: 0.02,
-            hangover_frames: 15,
+            threshold_rms: 0.008,
+            hangover_frames: 25,
         }
     }
 }

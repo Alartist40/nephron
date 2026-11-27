@@ -100,6 +100,7 @@ pub struct NephronApp {
     searcher: WebSearcher,
     web_sources: Vec<SearchResult>,
     web_rx: Option<mpsc::UnboundedReceiver<(String, Vec<SearchResult>)>>,
+    stt_rx: Option<mpsc::UnboundedReceiver<(Option<String>, Vec<u8>)>>,
     ui_time: f32,
 }
 
@@ -127,7 +128,7 @@ impl NephronApp {
             bubble_open: true,
             web_mode: false,
             inject_pinned: true,
-            auto_vad: false,
+            auto_vad: true,
             vad_was_speech: false,
             pet_active: false,
             swarm_active: false,
@@ -170,6 +171,7 @@ impl NephronApp {
             searcher: WebSearcher::default(),
             web_sources: Vec::new(),
             web_rx: None,
+            stt_rx: None,
             ui_time: 0.0,
         };
         app.poll_system();
@@ -336,34 +338,25 @@ impl NephronApp {
         if let Some(cap) = self.capture.take() {
             self.vad_was_speech = false;
             let samples = cap.stop();
-            if !samples.is_empty() && !self.streaming {
+            if !samples.is_empty() && !self.streaming && self.stt_rx.is_none() {
                 let wav = encode_pcm16_wav(&samples, SAMPLE_RATE);
-                if let Some(text) = transcribe_wav_local(&wav) {
-                    let _ = self.store.save_memory("voice", &text);
-                    self.sync_brain();
-                    self.dispatch_prompt(text);
-                    return;
-                }
-                let b64 = wav_to_base64(&wav);
-                let _ = self.store.save_memory("voice", "[voice audio prompt]");
-                self.sync_brain();
                 self.bubble_open = true;
-                self.messages.push(ChatMessage { role: ChatRole::User, content: "[Voice prompt]".into() });
-                self.messages.push(ChatMessage { role: ChatRole::Assistant, content: String::new() });
+                self.messages.push(ChatMessage {
+                    role: ChatRole::Assistant,
+                    content: "Transcribing voice...".into(),
+                });
                 let (tx, rx) = mpsc::unbounded_channel();
-                self.stream_rx = Some(rx);
-                self.streaming = true;
-                let client = self.client.clone();
-                let effort = self.effort;
-                let model_id = match self.backend_kind {
-                    BackendKind::Cynapse => ModelProfile::Lfm3Omni2B.id().to_string(),
-                    BackendKind::Ollama => self.selected_ollama.clone(),
-                };
+                self.stt_rx = Some(rx);
                 self.rt.spawn(async move {
-                    client.stream_audio_prompt_model(&model_id, effort, b64, tx).await;
+                    let wav_clone = wav.clone();
+                    let text = tokio::task::spawn_blocking(move || transcribe_wav_local(&wav_clone))
+                        .await
+                        .ok()
+                        .flatten();
+                    let _ = tx.send((text, wav));
                 });
             }
-        } else if !self.streaming {
+        } else if !self.streaming && self.stt_rx.is_none() {
             self.speech.interrupt();
             if let Ok(cap) = AudioCapture::start() {
                 self.capture = Some(cap);
@@ -512,6 +505,40 @@ impl NephronApp {
                 }
             }
             ctx.request_repaint_after(Duration::from_millis(20));
+        }
+        if let Some(rx) = &mut self.stt_rx {
+            if let Ok((maybe_text, wav)) = rx.try_recv() {
+                self.stt_rx = None;
+                if matches!(self.messages.last(), Some(m) if m.content == "Transcribing voice...") {
+                    self.messages.pop();
+                }
+                if let Some(text) = maybe_text {
+                    let _ = self.store.save_memory("voice", &text);
+                    self.sync_brain();
+                    self.dispatch_prompt(text);
+                } else if self.backend_kind == BackendKind::Cynapse {
+                    let b64 = wav_to_base64(&wav);
+                    let _ = self.store.save_memory("voice", "[voice audio prompt]");
+                    self.sync_brain();
+                    self.messages.push(ChatMessage { role: ChatRole::User, content: "[Voice prompt]".into() });
+                    self.messages.push(ChatMessage { role: ChatRole::Assistant, content: String::new() });
+                    let (tx, srx) = mpsc::unbounded_channel();
+                    self.stream_rx = Some(srx);
+                    self.streaming = true;
+                    let client = self.client.clone();
+                    let effort = self.effort;
+                    self.rt.spawn(async move {
+                        client.stream_audio_prompt(ModelProfile::Lfm3Omni2B, effort, b64, tx).await;
+                    });
+                } else {
+                    self.messages.push(ChatMessage {
+                        role: ChatRole::Assistant,
+                        content: "Didn't catch clear speech — try speaking a bit closer to the mic.".into(),
+                    });
+                }
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(20));
+            }
         }
         if let Some(rx) = &mut self.web_rx {
             if let Ok((q, hits)) = rx.try_recv() {
@@ -685,7 +712,7 @@ impl eframe::App for NephronApp {
             BrainActivity::Listening
         } else if self.speech.is_speaking() || (self.streaming && self.messages.last().map(|m| !m.content.is_empty()).unwrap_or(false)) {
             BrainActivity::Speaking
-        } else if self.streaming || self.cad_rx.is_some() || self.web_rx.is_some() || !self.input.is_empty() {
+        } else if self.streaming || self.stt_rx.is_some() || self.cad_rx.is_some() || self.web_rx.is_some() || !self.input.is_empty() {
             BrainActivity::Thinking
         } else {
             BrainActivity::Idle
